@@ -2,6 +2,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -37,6 +38,8 @@ import {
 import { Assistant } from './assistant.tsx';
 import { useConversationHistory } from './history.ts';
 import { Files as FilesView } from './files.tsx';
+import { Directory, Profile } from './directory.tsx';
+import { MoreNavigation } from './navigation.tsx';
 import type { z } from 'zod';
 import {
   rpcContract,
@@ -67,7 +70,14 @@ type Snapshot = {
   rooms: Room[];
   messages: Message[];
 };
-type Mode = 'home' | 'dms' | 'activity' | 'saved' | 'threads' | 'files';
+type Mode =
+  | 'home'
+  | 'dms'
+  | 'activity'
+  | 'saved'
+  | 'threads'
+  | 'files'
+  | 'directories';
 type Modal =
   | 'channel'
   | 'dm'
@@ -87,14 +97,25 @@ function Dialog({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = ref.current!;
+    const opener = document.activeElement as HTMLElement | null;
+    const owner = el.closest<HTMLElement>('.vv-slack');
     el.showModal();
     el.querySelector<HTMLElement>(
       'input,textarea,[contenteditable="true"]',
     )?.focus();
-    return () => el.close();
-  }, []);
+    return () => {
+      el.close();
+      if (opener?.isConnected && opener !== document.body) opener.focus();
+      else if (owner?.isConnected)
+        owner.querySelector<HTMLButtonElement>('.slack-top-search')?.focus();
+      queueMicrotask(() => {
+        if (document.activeElement === document.body && owner?.isConnected)
+          owner.querySelector<HTMLButtonElement>('.slack-top-search')?.focus();
+      });
+    };
+  }, [title]);
   return (
     <dialog
       className="slack-dialog"
@@ -241,6 +262,7 @@ function Composer({
 function Slack() {
   const [preview, setPreview] = useState<z.infer<typeof file> | null>(null);
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const [profileId, setProfileId] = useState<string | null>(null);
   const rpc = useRpc<typeof rpcContract>(),
     connection = useRealtimeConnectionState();
   const [data, setData] = useState<Snapshot | null>(null),
@@ -274,6 +296,7 @@ function Slack() {
   const [history, setHistory] = useState([roomId]),
     [historyAt, setHistoryAt] = useState(0);
   const root = useRef<HTMLElement>(null),
+    profileOrigin = useRef<HTMLElement | null>(null),
     searchInput = useRef<HTMLInputElement>(null),
     scroll = useRef<HTMLDivElement>(null),
     replyScroll = useRef<HTMLDivElement>(null),
@@ -328,12 +351,19 @@ function Slack() {
   useRealtime('changed', () => {
     void refresh().catch((e) => setError(String(e)));
   });
+  const profile = data?.members.find((member) => member.id === profileId);
   const room = data?.rooms.find((r) => r.id === roomId),
     memberName = (id: string) =>
       data?.members.find((m) => m.id === id)?.name ?? 'Teammate';
   const currentMessages = conversation.messages;
   const parent = conversation.parent;
   const unread = data?.rooms.reduce((n, r) => n + r.unread, 0) ?? 0;
+  useLayoutEffect(() => {
+    if (mode === 'home' && document.activeElement === document.body)
+      root.current
+        ?.querySelector<HTMLButtonElement>('.slack-main .slack-channel-header > button')
+        ?.focus();
+  }, [mode, roomId]);
   useEffect(() => {
     if (
       room &&
@@ -398,12 +428,14 @@ function Slack() {
   }, [conversation.threadPage]);
   function switchMode(next: Mode) {
     setMode(next);
+    setProfileId(null);
     setThreadId(null);
     setAssistantOpen(false);
     setConversationTab('messages');
   }
   function chooseConversationTab(next: 'messages' | 'files') {
     setConversationTab(next);
+    setProfileId(null);
     setMode('home');
     setThreadId(null);
     setAssistantOpen(false);
@@ -416,6 +448,7 @@ function Slack() {
       setHistoryAt(next.length - 1);
     }
     setRoomId(id);
+    setProfileId(null);
     conversation.move({});
     setThreadId(null);
     positionedThread.current = null;
@@ -428,6 +461,8 @@ function Slack() {
     if (at < 0 || at >= history.length) return;
     setHistoryAt(at);
     setRoomId(history[at]);
+    setProfileId(null);
+    setConversationTab('messages');
     setThreadId(null);
     positionedThread.current = null;
     setMode('home');
@@ -454,7 +489,12 @@ function Slack() {
         setModal('search');
       }
       if (event.key === 'Escape') {
-        if (modal) return;
+        if (modal || root.current?.querySelector('dialog[open], [popover]:popover-open'))
+          return;
+        if (profileId) {
+          closeProfile();
+          return;
+        }
         setThreadId(null);
         setReactionId(null);
         setAssistantOpen(false);
@@ -463,7 +503,7 @@ function Slack() {
     const el = root.current;
     el?.addEventListener('keydown', onKey);
     return () => el?.removeEventListener('keydown', onKey);
-  }, [modal]);
+  }, [modal, profileId]);
   async function act<T>(fn: () => Promise<T>) {
     setError('');
     try {
@@ -492,6 +532,44 @@ function Slack() {
   useEffect(() => {
     if (mode === 'saved') void find(true);
   }, [mode, data?.messages]);
+  function openProfile(id: string) {
+    profileOrigin.current = document.activeElement as HTMLElement;
+    setProfileId(id);
+    setThreadId(null);
+    setAssistantOpen(false);
+  }
+  function closeProfile() {
+    setProfileId(null);
+    const origin = profileOrigin.current;
+    if (origin?.isConnected) origin.focus();
+    else
+      root.current
+        ?.querySelector<HTMLInputElement>('input[type="search"]')
+        ?.focus();
+  }
+  function newChannel() {
+    setRoomName('');
+    setDescription('');
+    setModal('channel');
+  }
+  async function startDm(member: Member) {
+    setBusy(true);
+    try {
+      const room = await act(() =>
+        rpc.call('createRoom', {
+          name: member.name,
+          description: '',
+          recipient: member.id,
+        }),
+      );
+      if (room) {
+        navigate(room.id);
+        setModal(null);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
   function openSettings() {
     setWorkspace(data?.workspace ?? 'VV');
     setName(data?.me.name ?? 'You');
@@ -530,7 +608,17 @@ function Slack() {
         </div>
         <div className="slack-message-body">
           <div className="slack-byline">
-            <strong>{author?.name ?? 'Teammate'}</strong>
+            <button
+              type="button"
+              className="slack-author-button"
+              title="View teammate profile"
+              aria-label={`View ${author?.name ?? 'teammate'} profile`}
+              aria-describedby="slack-key-help"
+              disabled={!author}
+              onClick={() => author && openProfile(author.id)}
+            >
+              <strong>{author?.name ?? 'Teammate'}</strong>
+            </button>
             {author?.kind === 'agent' && (
               <span className="slack-app-badge">APP</span>
             )}
@@ -570,6 +658,7 @@ function Slack() {
                   name={memberName(m.lastReply?.author ?? m.author)}
                   timestamp={m.lastReply?.createdAt ?? m.createdAt}
                   onClick={() => {
+                    setProfileId(null);
                     setAssistantOpen(false);
                     setThreadId(m.id);
                   }}
@@ -583,6 +672,7 @@ function Slack() {
                 }}
                 onDelete={() => setDeleting(m)}
                 onThread={() => {
+                  setProfileId(null);
                   setAssistantOpen(false);
                   setThreadId(m.parentId ?? m.id);
                 }}
@@ -678,12 +768,13 @@ function Slack() {
               title={item.label}
               aria-current={
                 mode === item.id ||
-                (item.id === 'home' && ['threads', 'saved'].includes(mode))
+                (item.id === 'home' &&
+                  ['threads', 'saved', 'directories'].includes(mode))
                   ? 'page'
                   : undefined
               }
               aria-describedby="slack-key-help"
-              className={`slack-rail-item ${mode === item.id || (item.id === 'home' && ['threads', 'saved'].includes(mode)) ? 'is-current' : ''}`}
+              className={`slack-rail-item ${mode === item.id || (item.id === 'home' && ['threads', 'saved', 'directories'].includes(mode)) ? 'is-current' : ''}`}
               onClick={() => switchMode(item.id)}
             >
               <span>
@@ -695,6 +786,13 @@ function Slack() {
               {item.label}
             </button>
           ))}
+          <MoreNavigation
+            onSelect={(destination) => {
+              if (destination === 'settings') openSettings();
+              else if (destination === 'help') setModal('help');
+              else switchMode(destination);
+            }}
+          />
           <div className="slack-rail-bottom">
             <IconButton label="Workspace settings" onClick={openSettings}>
               <Settings size={21} />
@@ -705,7 +803,7 @@ function Slack() {
               title="Your profile"
               aria-label="Your profile"
               aria-describedby="slack-key-help"
-              onClick={openSettings}
+              onClick={() => openProfile(data.me.id)}
             >
               {data.me.name.charAt(0)}
             </button>
@@ -766,6 +864,17 @@ function Slack() {
                 </button>
                 <button
                   type="button"
+                  title="Browse workspace directory"
+                  className={mode === 'directories' ? 'selected' : ''}
+                  aria-current={mode === 'directories' ? 'page' : undefined}
+                  aria-describedby="slack-key-help"
+                  onClick={() => switchMode('directories')}
+                >
+                  <Users size={16} />
+                  Directories
+                </button>
+                <button
+                  type="button"
                   title="Show unread conversations"
                   aria-describedby="slack-key-help"
                   onClick={() => switchMode('activity')}
@@ -785,14 +894,7 @@ function Slack() {
                   Saved
                 </button>
               </div>
-              <WorkspaceSection
-                label="Channels"
-                onNew={() => {
-                  setRoomName('');
-                  setDescription('');
-                  setModal('channel');
-                }}
-              >
+              <WorkspaceSection label="Channels" onNew={newChannel}>
                 {data.rooms
                   .filter((r) => !r.recipient)
                   .map((r) => (
@@ -814,11 +916,7 @@ function Slack() {
                   className="slack-channel slack-add"
                   title="Add channel"
                   aria-describedby="slack-key-help"
-                  onClick={() => {
-                    setRoomName('');
-                    setDescription('');
-                    setModal('channel');
-                  }}
+                  onClick={newChannel}
                 >
                   <Plus size={17} />
                   <span>Add channels</span>
@@ -855,15 +953,20 @@ function Slack() {
                   <span>Add teammates</span>
                 </button>
               </WorkspaceSection>
-              <div className="slack-sidebar-foot">
-                Your team, together in VV.
-              </div>
             </>
           )}
         </aside>
         <main className="slack-main">
           {mode === 'files' ? (
             renderFiles()
+          ) : mode === 'directories' ? (
+            <Directory
+              rooms={data.rooms}
+              members={data.members}
+              onRoom={navigate}
+              onProfile={openProfile}
+              onCreate={newChannel}
+            />
           ) : (mode === 'home' || mode === 'threads') && room ? (
             <>
               <header className="slack-channel-header">
@@ -886,6 +989,7 @@ function Slack() {
                     label="Ask about conversation"
                     aria-pressed={assistantOpen}
                     onClick={() => {
+                      setProfileId(null);
                       setThreadId(null);
                       setAssistantOpen(!assistantOpen);
                     }}
@@ -1145,7 +1249,7 @@ function Slack() {
             </div>
           )}
         </main>
-        {assistantOpen && room && (
+        {assistantOpen && !profileId && room && (
           <Assistant
             key={roomId}
             roomId={roomId}
@@ -1160,7 +1264,7 @@ function Slack() {
             }}
           />
         )}
-        {!assistantOpen && threadId && parent && (
+        {!assistantOpen && !profileId && threadId && parent && (
           <aside className="slack-thread" aria-label="Thread">
             <header className="slack-channel-header">
               <h2>
@@ -1209,6 +1313,17 @@ function Slack() {
               }}
             />
           </aside>
+        )}
+        {profile && (
+          <Profile
+            member={profile}
+            me={data.me.id}
+            busy={busy}
+            error={error}
+            onClose={closeProfile}
+            onMessage={() => void startDm(profile)}
+            onEdit={openSettings}
+          />
         )}
       </div>
       {modal && (
@@ -1291,23 +1406,7 @@ function Slack() {
                     aria-describedby="slack-key-help"
                     disabled={busy}
                     key={m.id}
-                    onClick={() => {
-                      setBusy(true);
-                      void act(() =>
-                        rpc.call('createRoom', {
-                          name: m.name,
-                          description: '',
-                          recipient: m.id,
-                        }),
-                      )
-                        .then((r) => {
-                          if (r) {
-                            navigate(r.id);
-                            setModal(null);
-                          }
-                        })
-                        .finally(() => setBusy(false));
-                    }}
+                    onClick={() => void startDm(m)}
                   >
                     <Bot size={22} />
                     {m.name}
@@ -1562,7 +1661,8 @@ function Slack() {
       )}
       <span id="slack-key-help" className="slack-sr">
         Use Tab to focus controls, then Enter or Space to activate. Escape
-        closes dialogs and the thread pane. Actions save in this VV workspace.
+        closes menus, profiles, dialogs and the thread pane. Actions save in
+        this VV workspace.
       </span>
     </section>
   );

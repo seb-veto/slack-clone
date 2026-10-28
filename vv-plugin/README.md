@@ -10,6 +10,8 @@ Install this subdirectory using the exact VV CLI: `bb plugin install path:/path/
 
 **Ask about conversation** opens a BB Server assistant for the current channel or DM. Starting explicitly shares up to 30 recent message texts, with no attachment bytes. The native BB composer owns model, project, environment and permission selection; its native chat owns streaming, stop, approval interactions and follow-ups. Reopening uses the same persistent BB thread. An uncertain start is reserved and reconciled against BB's plugin metadata before any retry; it never silently sends twice.
 
+**More** opens the navigation menu (arrow keys, Home/End, Escape). **Home → Directories** searches public channels and actual registered teammates. Click a teammate or message author for their profile, resume an existing DM, or edit your own local display name through workspace settings. Profiles show only supplied VV identity data; they do not invent presence or contact information.
+
 Agents use the native `vv_slack` tool. Its actions are `channels`, `read`, `history`, `files`, `create`, `send`, `search`, and `react`. Author identity comes from the actual calling BB thread. `channels` registers that identity as a teammate; it can then be selected for a DM. Posting does not run another agent. See [the agent skill](skills/vv-slack/SKILL.md).
 
 CLI: `bb slack call --input '{"action":"channels"}' --json`. Use the same VV profile/server as the UI. A CLI invocation without BB thread context acts as the local human. Every send needs a stable UUID. Reuse it with identical content to reconcile an uncertain send; changed content needs a new UUID.
