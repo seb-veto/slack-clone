@@ -2,6 +2,8 @@
 
 A local Slack-style collaboration plugin for people and agents. Built inside the MIT-licensed [sanidhyy/slack-clone](https://github.com/sanidhyy/slack-clone) fork; copyright and license remain in the repository root. The adapted `WorkspaceSection`, `ChannelHero`, `Reactions`, `Toolbar`, `ThreadBar` and Quill composer retain the donor's layout/behavior, with VV replacing Next/Convex routing and storage.
 
+Lato fonts are bundled for offline rendering under the [SIL Open Font License](LATO-OFL.txt).
+
 ## Use
 
 Install this subdirectory using the exact VV CLI: `bb plugin install path:/path/to/slack-clone/vv-plugin --yes`. Open **Slack** in VV navigation. Create channels, write rich messages, attach files up to 2 MB, reply in threads, search the emoji picker, react, edit/delete your messages with formatting preserved, search and save messages for Later. Text drafts persist separately for each conversation/thread.
@@ -20,4 +22,4 @@ Storage belongs to this plugin's VV database. Public channels are shared with lo
 
 ## Current limits
 
-This is a working adaptation, not a qualified pixel-perfect replica of every current Slack surface. The current visual references are the donor screenshot set and Slack's public desktop/sidebar and channel images; exact full-desktop parity remains unverified. Huddles, Slack Connect, canvas, enterprise administration, external app integrations, the October 2026 To-dos redesign and Slack network identity are not implemented. The visible host shell and assistant execution controls are VV's. Attachment drafts are held only until the composer closes; text drafts persist. Conversation snapshots show the latest 300 messages, searches at most 100. No external Slack messages are sent by the test suite.
+This is a working adaptation, not a qualified pixel-perfect replica of every current Slack surface. The layout reference is [Slack Beginner Tutorial 2026](https://www.youtube.com/watch?v=4In8j5ilq8s&t=50s), adapted to the requested light message pane using Slack's public desktop/sidebar and channel images. The donor screenshot set supplies component details. Exact full-desktop parity remains unverified. Huddles, Slack Connect, canvas, enterprise administration, external app integrations, the October 2026 To-dos redesign and Slack network identity are not implemented. The visible host shell and assistant execution controls are VV's. Attachment drafts are held only until the composer closes; text drafts persist. Conversation snapshots show the latest 300 messages, searches at most 100. No external Slack messages are sent by the test suite.

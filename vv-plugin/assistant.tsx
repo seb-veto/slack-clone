@@ -71,7 +71,7 @@ export function Assistant({
           variant="compact"
           layout="contained"
           permissionPolicy="inherit"
-          className="slack-assistant-chat"
+          className="slack-assistant-chat slack-native"
         />
       ) : session ? (
         <div role="alert" className="slack-assistant-loading">
@@ -79,7 +79,7 @@ export function Assistant({
             'A creation request is pending. No second request will be sent.'}
         </div>
       ) : (
-        <div className="slack-assistant-composer">
+        <div className="slack-assistant-composer slack-native">
           <h3>What would you like to know?</h3>
           <p>
             Summarize this conversation, find a decision, or work through a

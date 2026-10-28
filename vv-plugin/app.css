@@ -1,3 +1,5 @@
+@import './fonts.css';
+
 .vv-slack {
   --slack-ink: #1d1c1d;
   --slack-muted: #616061;
@@ -18,28 +20,28 @@
 .vv-slack * {
   box-sizing: border-box;
 }
-.vv-slack button,
-.vv-slack input,
-.vv-slack textarea {
+.vv-slack button:not(:where(.slack-native *)),
+.vv-slack input:not(:where(.slack-native *)),
+.vv-slack textarea:not(:where(.slack-native *)) {
   font: inherit;
 }
-.vv-slack button {
+.vv-slack button:not(:where(.slack-native *)) {
   cursor: pointer;
   border: 0;
   background: transparent;
   color: inherit;
 }
-.vv-slack button:disabled {
+.vv-slack button:not(:where(.slack-native *)):disabled {
   cursor: default;
   opacity: 0.4;
 }
-.vv-slack button:focus-visible,
-.vv-slack input:focus-visible,
-.vv-slack textarea:focus-visible {
+.vv-slack button:not(:where(.slack-native *)):focus-visible,
+.vv-slack input:not(:where(.slack-native *)):focus-visible,
+.vv-slack textarea:not(:where(.slack-native *)):focus-visible {
   outline: 3px solid #1264a3;
   outline-offset: 2px;
 }
-.vv-slack button[aria-label] {
+.vv-slack button:not(:where(.slack-native *))[aria-label] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -47,20 +49,20 @@
   min-width: 28px;
   min-height: 28px;
 }
-.vv-slack button[aria-label]:hover {
+.vv-slack button:not(:where(.slack-native *))[aria-label]:hover {
   background: #1d1c1d0d;
 }
-.vv-slack p {
+.vv-slack p:not(:where(.slack-native *)) {
   margin: 0 0 12px;
 }
-.vv-slack h1,
-.vv-slack h2,
-.vv-slack h3 {
+.vv-slack h1:not(:where(.slack-native *)),
+.vv-slack h2:not(:where(.slack-native *)),
+.vv-slack h3:not(:where(.slack-native *)) {
   color: inherit;
   font-weight: 800;
   margin: 0;
 }
-.vv-slack svg {
+.vv-slack svg:not(:where(.slack-native *)) {
   flex-shrink: 0;
 }
 .slack-topbar {
@@ -1121,15 +1123,17 @@
   font-size: 14px;
   margin-bottom: 24px;
 }
-@container (max-width:850px) {
-  .slack-sidebar {
-    width: 185px;
-  }
+@container (max-width:1150px) {
   .slack-thread {
     position: absolute;
     inset: 40px 0 0 70px;
     z-index: 4;
     min-width: 0;
+  }
+}
+@container (max-width:850px) {
+  .slack-sidebar {
+    width: 185px;
   }
   .slack-history {
     width: 65px;
