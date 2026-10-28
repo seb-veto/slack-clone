@@ -1,0 +1,42 @@
+{
+  "name": "bb-plugin-slack",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "bbPluginSdk": ">=0.6.55 <0.7"
+  },
+  "bb": {
+    "name": "Slack",
+    "description": "Channels, direct messages and threads for people and agents in VV.",
+    "branding": {
+      "icon": "MessagesSquare"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx",
+    "skills": [
+      "./skills"
+    ]
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "quill": "^2.0.3",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@get-bb/plugin-sdk": "file:vendor-sdk/get-bb-plugin-sdk-0.6.55.tgz",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "better-sqlite3": "^12.0.0",
+    "cron-parser": "^5.10.2",
+    "hono": "^4.13.14",
+    "react": "19.2.0",
+    "tsx": "^4.20.0",
+    "typescript": "5.7.3"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts"
+  }
+}
