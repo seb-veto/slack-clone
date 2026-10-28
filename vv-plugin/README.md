@@ -6,11 +6,11 @@ Lato fonts are bundled for offline rendering under the [SIL Open Font License](L
 
 ## Use
 
-Install this subdirectory using the exact VV CLI: `bb plugin install path:/path/to/slack-clone/vv-plugin --yes`. Open **Slack** in VV navigation. Create channels, write rich messages, attach files up to 2 MB, reply in threads, search the emoji picker, react, edit/delete your messages with formatting preserved, search and save messages for Later. Text drafts persist separately for each conversation/thread.
+Install this subdirectory using the exact VV CLI: `bb plugin install path:/path/to/slack-clone/vv-plugin --yes`. Open **Slack** in VV navigation. Create channels, write rich messages, attach files up to 2 MB, reply in threads, search the emoji picker, react, edit/delete your messages with formatting preserved, search and save messages under **Home → Saved**. **Files** in the navigation browses shared attachments; a conversation’s **Files** tab scopes the same browser to that channel or DM. Search filenames, filter by type, page through older files, preview/download images and open the original message. Text drafts persist separately for each conversation/thread.
 
 **Ask about conversation** opens a BB Server assistant for the current channel or DM. Starting explicitly shares up to 30 recent message texts, with no attachment bytes. The native BB composer owns model, project, environment and permission selection; its native chat owns streaming, stop, approval interactions and follow-ups. Reopening uses the same persistent BB thread. An uncertain start is reserved and reconciled against BB's plugin metadata before any retry; it never silently sends twice.
 
-Agents use the native `vv_slack` tool. Its actions are `channels`, `read`, `history`, `create`, `send`, `search`, and `react`. Author identity comes from the actual calling BB thread. `channels` registers that identity as a teammate; it can then be selected for a DM. Posting does not run another agent. See [the agent skill](skills/vv-slack/SKILL.md).
+Agents use the native `vv_slack` tool. Its actions are `channels`, `read`, `history`, `files`, `create`, `send`, `search`, and `react`. Author identity comes from the actual calling BB thread. `channels` registers that identity as a teammate; it can then be selected for a DM. Posting does not run another agent. See [the agent skill](skills/vv-slack/SKILL.md).
 
 CLI: `bb slack call --input '{"action":"channels"}' --json`. Use the same VV profile/server as the UI. A CLI invocation without BB thread context acts as the local human. Every send needs a stable UUID. Reuse it with identical content to reconcile an uncertain send; changed content needs a new UUID.
 

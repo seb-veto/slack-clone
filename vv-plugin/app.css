@@ -1214,3 +1214,126 @@
     display: none;
   }
 }
+.slack-files {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  background: #fff;
+}
+.slack-files-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--slack-border);
+}
+.slack-files-search {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 160px;
+  max-width: 540px;
+  gap: 8px;
+  border: 1px solid #aaa;
+  border-radius: 5px;
+  padding: 7px 10px;
+}
+.slack-files-search input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+.slack-files-filters > label:last-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.slack-files-filters select,
+.slack-files-filters > button,
+.slack-files-pages button {
+  padding: 7px 12px;
+  border: 1px solid #aaa;
+  border-radius: 5px;
+  background: #fff;
+  color: var(--slack-ink);
+  font: inherit;
+}
+.slack-files-filters > button:hover,
+.slack-files-pages button:hover {
+  background: #f8f8f8;
+}
+.slack-files-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.slack-files-loading { padding: 24px; }
+.slack-files-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+  gap: 16px;
+  padding: 24px;
+}
+.slack-file-card {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--slack-border);
+  border-radius: 8px;
+}
+.slack-file-card .slack-file {
+  max-width: 100%;
+  width: 100%;
+  border: 0 !important;
+  margin: 0;
+}
+.slack-file-card .slack-image-thumbnail {
+  width: 100%;
+  max-width: 100%;
+}
+.slack-file-card .slack-image-thumbnail img {
+  width: 100%;
+  height: 150px;
+  object-fit: contain;
+  background: #f8f8f8;
+}
+.slack-file-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--slack-muted);
+}
+.slack-file-conversation {
+  display: block;
+  max-width: 100%;
+  padding: 4px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #1264a3 !important;
+  font-size: 13px !important;
+}
+.slack-file-conversation:hover { text-decoration: underline; }
+.slack-files-pages {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  padding: 0 24px 24px;
+}
+.slack-message-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.slack-message-view[hidden] { display: none; }
+.slack-files-filters select:focus-visible {
+  outline: 3px solid #1264a3;
+  outline-offset: 2px;
+}

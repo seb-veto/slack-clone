@@ -122,6 +122,12 @@ export const historyPage = z.object({
   after: id.nullable(),
 });
 export type HistoryPage = z.infer<typeof historyPage>;
+export const filesInput = z.object({
+  query: z.string().trim().max(200).default(''),
+  type: z.enum(['all', 'images', 'pdfs', 'text']).default('all'),
+  roomId: id.optional(),
+  before: id.optional(),
+});
 export const assistantSession = z.object({
   requestId: z.string().uuid(),
   roomId: id,
@@ -143,6 +149,10 @@ export const assistantRequest = z.object({
   sessionOptions: z.json().optional(),
 });
 export const rpcContract = defineRpcContract({
+  files: {
+    input: filesInput,
+    output: z.object({ messages: z.array(message), next: id.nullable() }),
+  },
   history: { input: historyInput, output: historyPage },
   assistant: {
     input: z.object({ roomId: id }),

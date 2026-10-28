@@ -8,6 +8,7 @@ import {
   roomInput,
   sendInput,
   historyInput,
+  filesInput,
   type Message,
   type Member,
   type Room,
@@ -238,6 +239,46 @@ export function createStore(bb: BbPluginApi) {
     createRoom,
     send,
     readMessage,
+    files(input: z.input<typeof filesInput>, who: string) {
+      const v = filesInput.parse(input);
+      if (v.roomId) access(v.roomId, who);
+      const anchor = v.before ? readMessage(v.before, who) : null;
+      // Deleted cursor rows retain their ordering position after their file is removed.
+      if (
+        anchor &&
+        ((!anchor.attachment && !anchor.deleted) ||
+          (v.roomId && anchor.roomId !== v.roomId))
+      )
+        throw new Error('File cursor not available.');
+      const seq = anchor
+        ? (
+            db
+              .prepare('SELECT rowid AS seq FROM messages WHERE id=?')
+              .get(anchor.id) as { seq: number }
+          ).seq
+        : null;
+      const type = {
+        all: '',
+        images: "AND json_extract(m.attachment,'$.mime') LIKE 'image/%'",
+        pdfs: "AND json_extract(m.attachment,'$.mime')='application/pdf'",
+        text: "AND json_extract(m.attachment,'$.mime')='text/plain'",
+      }[v.type];
+      const rows = db
+        .prepare(
+          `SELECT m.id FROM messages m JOIN rooms r ON r.id=m.roomId WHERE m.deleted=0 AND m.attachment IS NOT NULL AND (r.recipient IS NULL OR r.recipient=? OR r.creator=?) AND instr(lower(json_extract(m.attachment,'$.name')),lower(?))>0 ${type} ${v.roomId ? 'AND m.roomId=?' : ''} ${anchor ? 'AND (m.createdAt,m.rowid)<(?,?)' : ''} ORDER BY m.createdAt DESC,m.rowid DESC LIMIT 101`,
+        )
+        .all(
+          who,
+          who,
+          v.query,
+          ...(v.roomId ? [v.roomId] : []),
+          ...(anchor ? [anchor.createdAt, seq] : []),
+        ) as { id: string }[];
+      return {
+        messages: rows.slice(0, 100).map((row) => readMessage(row.id, who)),
+        next: rows.length > 100 ? rows[99].id : null,
+      };
+    },
     history(input: z.input<typeof historyInput>, who: string) {
       const v = historyInput.parse(input);
       access(v.roomId, who);
@@ -385,8 +426,7 @@ export function createStore(bb: BbPluginApi) {
           .all(query, who, who, ...(saved ? [who] : [])) as {
           id: string;
         }[]
-      )
-        .map((m) => readMessage(m.id, who));
+      ).map((m) => readMessage(m.id, who));
     },
     markRead(roomId: string, through: number, who: string) {
       access(roomId, who);

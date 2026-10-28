@@ -32,9 +32,11 @@ import {
   Users,
   Check,
   Sparkles,
+  Files as FilesIcon,
 } from 'lucide-react';
 import { Assistant } from './assistant.tsx';
 import { useConversationHistory } from './history.ts';
+import { Files as FilesView } from './files.tsx';
 import type { z } from 'zod';
 import {
   rpcContract,
@@ -65,7 +67,7 @@ type Snapshot = {
   rooms: Room[];
   messages: Message[];
 };
-type Mode = 'home' | 'dms' | 'activity' | 'saved' | 'threads';
+type Mode = 'home' | 'dms' | 'activity' | 'saved' | 'threads' | 'files';
 type Modal =
   | 'channel'
   | 'dm'
@@ -255,6 +257,9 @@ function Slack() {
     [modal, setModal] = useState<Modal>(null),
     [error, setError] = useState('');
   const conversation = useConversationHistory(rpc, roomId, threadId);
+  const [conversationTab, setConversationTab] = useState<'messages' | 'files'>(
+    'messages',
+  );
   const [query, setQuery] = useState(''),
     [results, setResults] = useState<Message[]>([]),
     [searched, setSearched] = useState(false),
@@ -333,6 +338,7 @@ function Slack() {
     if (
       room &&
       mode === 'home' &&
+      conversationTab === 'messages' &&
       currentMessages.length &&
       document.visibilityState === 'visible'
     ) {
@@ -347,9 +353,22 @@ function Slack() {
         })
         .catch(() => {});
     }
-  }, [roomId, data, conversation.page, conversation.threadPage, mode, rpc]);
+  }, [
+    roomId,
+    data,
+    conversation.page,
+    conversation.threadPage,
+    conversationTab,
+    mode,
+    rpc,
+  ]);
   useEffect(() => {
-    if (!scroll.current || !conversation.page) return;
+    if (
+      !scroll.current ||
+      !conversation.page ||
+      (mode === 'home' && conversationTab !== 'messages')
+    )
+      return;
     if (conversation.anchor && positionedPage.current !== conversation.key) {
       scroll.current
         .querySelector<HTMLElement>(
@@ -361,7 +380,7 @@ function Slack() {
       scroll.current.scrollTop = scroll.current.scrollHeight;
     }
     positionedPage.current = conversation.key;
-  }, [conversation.page, roomId]);
+  }, [conversation.page, roomId, conversationTab, mode]);
   useEffect(() => {
     if (!replyScroll.current || !conversation.threadPage) return;
     const changed = positionedThread.current !== conversation.threadKey;
@@ -377,6 +396,18 @@ function Slack() {
     }
     positionedThread.current = conversation.threadKey;
   }, [conversation.threadPage]);
+  function switchMode(next: Mode) {
+    setMode(next);
+    setThreadId(null);
+    setAssistantOpen(false);
+    setConversationTab('messages');
+  }
+  function chooseConversationTab(next: 'messages' | 'files') {
+    setConversationTab(next);
+    setMode('home');
+    setThreadId(null);
+    setAssistantOpen(false);
+  }
   const navigate = (id: string) => {
     if (id !== roomId) {
       const next = history.slice(0, historyAt + 1);
@@ -389,6 +420,7 @@ function Slack() {
     setThreadId(null);
     positionedThread.current = null;
     setMode('home');
+    setConversationTab('messages');
     wasNearBottom.current = true;
   };
   const changeHistory = (offset: number) => {
@@ -563,6 +595,19 @@ function Slack() {
       </article>
     );
   }
+  function renderFiles(scope?: string) {
+    return (
+      <FilesView
+        key={scope ?? 'all'}
+        roomId={scope}
+        rooms={data?.rooms ?? []}
+        members={data?.members ?? []}
+        onOpen={jumpToMessage}
+        onDownload={(message) => void download(message)}
+        onPreview={setPreview}
+      />
+    );
+  }
   if (!data)
     return (
       <section className="vv-slack slack-loading" aria-label="Slack">
@@ -624,17 +669,22 @@ function Slack() {
               { id: 'home', label: 'Home', icon: Home },
               { id: 'dms', label: 'DMs', icon: MessagesSquare },
               { id: 'activity', label: 'Activity', icon: Bell },
-              { id: 'saved', label: 'Later', icon: Bookmark },
+              { id: 'files', label: 'Files', icon: FilesIcon },
             ] as const
           ).map((item) => (
             <button
               type="button"
               key={item.id}
               title={item.label}
-              aria-current={mode === item.id ? 'page' : undefined}
+              aria-current={
+                mode === item.id ||
+                (item.id === 'home' && ['threads', 'saved'].includes(mode))
+                  ? 'page'
+                  : undefined
+              }
               aria-describedby="slack-key-help"
-              className={`slack-rail-item ${mode === item.id || (item.id === 'home' && mode === 'threads') ? 'is-current' : ''}`}
-              onClick={() => setMode(item.id)}
+              className={`slack-rail-item ${mode === item.id || (item.id === 'home' && ['threads', 'saved'].includes(mode)) ? 'is-current' : ''}`}
+              onClick={() => switchMode(item.id)}
             >
               <span>
                 <item.icon size={22} />
@@ -665,115 +715,156 @@ function Slack() {
           className="slack-sidebar"
           aria-label="Channels and direct messages"
         >
-          <div className="slack-workspace-header">
-            <button
-              type="button"
-              title="Workspace settings"
-              aria-describedby="slack-key-help"
-              onClick={openSettings}
-            >
-              <strong>{data.workspace}</strong>
-              <ChevronDown size={16} />
-            </button>
-            <IconButton label="New conversation" onClick={() => setModal('dm')}>
-              <Pencil size={18} />
-            </IconButton>
-          </div>
-          <div className="slack-sidebar-links">
-            <button
-              type="button"
-              title="View channel threads"
-              aria-describedby="slack-key-help"
-              className={mode === 'threads' ? 'selected' : ''}
-              onClick={() => setMode('threads')}
-            >
-              <MessageSquareText size={16} />
-              Threads
-            </button>
-            <button
-              type="button"
-              title="Show unread conversations"
-              aria-describedby="slack-key-help"
-              onClick={() => setMode('activity')}
-            >
-              <Bell size={16} />
-              Unreads {unread > 0 && <b>{unread}</b>}
-            </button>
-          </div>
-          <WorkspaceSection
-            label="Channels"
-            onNew={() => {
-              setRoomName('');
-              setDescription('');
-              setModal('channel');
-            }}
-          >
-            {data.rooms
-              .filter((r) => !r.recipient)
-              .map((r) => (
+          {mode === 'files' ? (
+            <div className="slack-workspace-header">
+              <strong>Files</strong>
+            </div>
+          ) : (
+            <div className="slack-workspace-header">
+              <button
+                type="button"
+                title="Workspace settings"
+                aria-describedby="slack-key-help"
+                onClick={openSettings}
+              >
+                <strong>{data.workspace}</strong>
+                <ChevronDown size={16} />
+              </button>
+              <IconButton
+                label="New conversation"
+                onClick={() => setModal('dm')}
+              >
+                <Pencil size={18} />
+              </IconButton>
+            </div>
+          )}
+          {mode === 'files' ? (
+            <div className="slack-sidebar-links">
+              <button
+                type="button"
+                className="selected"
+                title="Browse all shared files"
+                aria-describedby="slack-key-help"
+                onClick={() => switchMode('files')}
+              >
+                <FilesIcon size={16} />
+                All files
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="slack-sidebar-links">
                 <button
                   type="button"
-                  title={`Open #${r.name}`}
+                  title="View channel threads"
                   aria-describedby="slack-key-help"
-                  key={r.id}
-                  className={`slack-channel ${roomId === r.id && mode === 'home' ? 'selected' : ''} ${r.unread ? 'has-unread' : ''}`}
-                  onClick={() => navigate(r.id)}
+                  className={mode === 'threads' ? 'selected' : ''}
+                  onClick={() => switchMode('threads')}
                 >
-                  <Hash size={17} />
-                  <span>{r.name}</span>
-                  {r.unread > 0 && <b>{r.unread}</b>}
+                  <MessageSquareText size={16} />
+                  Threads
                 </button>
-              ))}
-            <button
-              type="button"
-              className="slack-channel slack-add"
-              title="Add channel"
-              aria-describedby="slack-key-help"
-              onClick={() => {
-                setRoomName('');
-                setDescription('');
-                setModal('channel');
-              }}
-            >
-              <Plus size={17} />
-              <span>Add channels</span>
-            </button>
-          </WorkspaceSection>
-          <WorkspaceSection
-            label="Direct messages"
-            onNew={() => setModal('dm')}
-          >
-            {data.rooms
-              .filter((r) => r.recipient)
-              .map((r) => (
                 <button
                   type="button"
-                  title={`Open ${r.name}`}
+                  title="Show unread conversations"
                   aria-describedby="slack-key-help"
-                  className={`slack-channel ${roomId === r.id && mode === 'home' ? 'selected' : ''}`}
-                  key={r.id}
-                  onClick={() => navigate(r.id)}
+                  onClick={() => switchMode('activity')}
                 >
-                  <Bot size={17} />
-                  <span>{r.name}</span>
-                  {r.unread > 0 && <b>{r.unread}</b>}
+                  <Bell size={16} />
+                  Unreads {unread > 0 && <b>{unread}</b>}
                 </button>
-              ))}
-            <button
-              type="button"
-              className="slack-channel slack-add"
-              title="Find a teammate"
-              aria-describedby="slack-key-help"
-              onClick={() => setModal('dm')}
-            >
-              <Plus size={17} />
-              <span>Add teammates</span>
-            </button>
-          </WorkspaceSection>
-          <div className="slack-sidebar-foot">Your team, together in VV.</div>
+                <button
+                  type="button"
+                  title="View saved messages"
+                  aria-current={mode === 'saved' ? 'page' : undefined}
+                  className={mode === 'saved' ? 'selected' : ''}
+                  aria-describedby="slack-key-help"
+                  onClick={() => switchMode('saved')}
+                >
+                  <Bookmark size={16} />
+                  Saved
+                </button>
+              </div>
+              <WorkspaceSection
+                label="Channels"
+                onNew={() => {
+                  setRoomName('');
+                  setDescription('');
+                  setModal('channel');
+                }}
+              >
+                {data.rooms
+                  .filter((r) => !r.recipient)
+                  .map((r) => (
+                    <button
+                      type="button"
+                      title={`Open #${r.name}`}
+                      aria-describedby="slack-key-help"
+                      key={r.id}
+                      className={`slack-channel ${roomId === r.id && mode === 'home' ? 'selected' : ''} ${r.unread ? 'has-unread' : ''}`}
+                      onClick={() => navigate(r.id)}
+                    >
+                      <Hash size={17} />
+                      <span>{r.name}</span>
+                      {r.unread > 0 && <b>{r.unread}</b>}
+                    </button>
+                  ))}
+                <button
+                  type="button"
+                  className="slack-channel slack-add"
+                  title="Add channel"
+                  aria-describedby="slack-key-help"
+                  onClick={() => {
+                    setRoomName('');
+                    setDescription('');
+                    setModal('channel');
+                  }}
+                >
+                  <Plus size={17} />
+                  <span>Add channels</span>
+                </button>
+              </WorkspaceSection>
+              <WorkspaceSection
+                label="Direct messages"
+                onNew={() => setModal('dm')}
+              >
+                {data.rooms
+                  .filter((r) => r.recipient)
+                  .map((r) => (
+                    <button
+                      type="button"
+                      title={`Open ${r.name}`}
+                      aria-describedby="slack-key-help"
+                      className={`slack-channel ${roomId === r.id && mode === 'home' ? 'selected' : ''}`}
+                      key={r.id}
+                      onClick={() => navigate(r.id)}
+                    >
+                      <Bot size={17} />
+                      <span>{r.name}</span>
+                      {r.unread > 0 && <b>{r.unread}</b>}
+                    </button>
+                  ))}
+                <button
+                  type="button"
+                  className="slack-channel slack-add"
+                  title="Find a teammate"
+                  aria-describedby="slack-key-help"
+                  onClick={() => setModal('dm')}
+                >
+                  <Plus size={17} />
+                  <span>Add teammates</span>
+                </button>
+              </WorkspaceSection>
+              <div className="slack-sidebar-foot">
+                Your team, together in VV.
+              </div>
+            </>
+          )}
         </aside>
         <main className="slack-main">
-          {(mode === 'home' || mode === 'threads') && room ? (
+          {mode === 'files' ? (
+            renderFiles()
+          ) : (mode === 'home' || mode === 'threads') && room ? (
             <>
               <header className="slack-channel-header">
                 <button
@@ -804,117 +895,145 @@ function Slack() {
                 </div>
               </header>
               <div className="slack-channel-tabs">
-                <span className="active-tab">Messages</span>
+                <button
+                  type="button"
+                  className={conversationTab === 'messages' ? 'active-tab' : ''}
+                  aria-pressed={conversationTab === 'messages'}
+                  title="Show conversation messages"
+                  aria-describedby="slack-key-help"
+                  onClick={() => chooseConversationTab('messages')}
+                >
+                  Messages
+                </button>
+                <button
+                  type="button"
+                  className={conversationTab === 'files' ? 'active-tab' : ''}
+                  aria-pressed={conversationTab === 'files'}
+                  title="Browse shared files"
+                  aria-describedby="slack-key-help"
+                  onClick={() => chooseConversationTab('files')}
+                >
+                  Files
+                </button>
                 {connection !== 'connected' && (
                   <span role="status">Reconnecting…</span>
                 )}
               </div>
+              {mode === 'home' &&
+                conversationTab === 'files' &&
+                renderFiles(roomId)}
               <div
-                className="slack-message-scroll"
-                ref={scroll}
-                onScroll={() => {
-                  if (scroll.current)
-                    wasNearBottom.current =
-                      scroll.current.scrollHeight -
-                        scroll.current.scrollTop -
-                        scroll.current.clientHeight <
-                      90;
-                }}
+                className="slack-message-view"
+                hidden={mode === 'home' && conversationTab === 'files'}
               >
-                <HistoryNavigation
-                  page={conversation.page}
-                  name="channel"
-                  onMove={(cursor) => {
-                    wasNearBottom.current = !cursor.after;
-                    if (cursor.after && scroll.current)
-                      scroll.current.scrollTop = 0;
-                    conversation.move(cursor);
+                <div
+                  className="slack-message-scroll"
+                  ref={scroll}
+                  onScroll={() => {
+                    if (scroll.current && conversationTab === 'messages')
+                      wasNearBottom.current =
+                        scroll.current.scrollHeight -
+                          scroll.current.scrollTop -
+                          scroll.current.clientHeight <
+                        90;
                   }}
-                />
-                {mode === 'threads' ? (
-                  <>
-                    <h2 className="slack-list-title">
-                      Threads in {room.recipient ? room.name : `#${room.name}`}
-                    </h2>
-                    {currentMessages
-                      .filter((m) => !m.parentId && m.replyCount > 0)
-                      .map((m) => messageCard(m))}
-                    {!currentMessages.some((m) => m.replyCount > 0) && (
-                      <div className="slack-empty">
-                        <MessageSquareText size={36} />
-                        <h2>A little more room to talk</h2>
-                        <p>
-                          Reply to a message in a thread to keep the
-                          conversation organized.
-                        </p>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    {conversation.page?.before === null &&
-                      (room.recipient ? (
-                        <div className="slack-hero">
-                          <div className="slack-avatar slack-avatar-agent">
-                            <Bot size={30} />
-                          </div>
-                          <h1>{room.name}</h1>
+                >
+                  <HistoryNavigation
+                    page={conversation.page}
+                    name="channel"
+                    onMove={(cursor) => {
+                      wasNearBottom.current = !cursor.after;
+                      if (cursor.after && scroll.current)
+                        scroll.current.scrollTop = 0;
+                      conversation.move(cursor);
+                    }}
+                  />
+                  {mode === 'threads' ? (
+                    <>
+                      <h2 className="slack-list-title">
+                        Threads in{' '}
+                        {room.recipient ? room.name : `#${room.name}`}
+                      </h2>
+                      {currentMessages
+                        .filter((m) => !m.parentId && m.replyCount > 0)
+                        .map((m) => messageCard(m))}
+                      {!currentMessages.some((m) => m.replyCount > 0) && (
+                        <div className="slack-empty">
+                          <MessageSquareText size={36} />
+                          <h2>A little more room to talk</h2>
                           <p>
-                            This conversation is between you and {room.name}.
-                            Messages stay in VV.
+                            Reply to a message in a thread to keep the
+                            conversation organized.
                           </p>
                         </div>
-                      ) : (
-                        <ChannelHero
-                          name={room.name}
-                          description={room.description}
-                          createdAt={room.createdAt}
-                        />
-                      ))}
-                    {currentMessages.map((m, index) => (
-                      <Fragment key={m.id}>
-                        {(index === 0 ||
-                          new Date(m.createdAt).toDateString() !==
-                            new Date(
-                              currentMessages[index - 1].createdAt,
-                            ).toDateString()) && (
-                          <div className="slack-date-rule">
-                            <span>
-                              {new Date(m.createdAt).toLocaleDateString(
-                                undefined,
-                                {
-                                  month: 'long',
-                                  day: 'numeric',
-                                  year:
-                                    new Date(m.createdAt).getFullYear() ===
-                                    new Date().getFullYear()
-                                      ? undefined
-                                      : 'numeric',
-                                },
-                              )}
-                            </span>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {conversation.page?.before === null &&
+                        (room.recipient ? (
+                          <div className="slack-hero">
+                            <div className="slack-avatar slack-avatar-agent">
+                              <Bot size={30} />
+                            </div>
+                            <h1>{room.name}</h1>
+                            <p>
+                              This conversation is between you and {room.name}.
+                              Messages stay in VV.
+                            </p>
                           </div>
-                        )}
-                        {messageCard(m)}
-                      </Fragment>
-                    ))}
-                  </>
+                        ) : (
+                          <ChannelHero
+                            name={room.name}
+                            description={room.description}
+                            createdAt={room.createdAt}
+                          />
+                        ))}
+                      {currentMessages.map((m, index) => (
+                        <Fragment key={m.id}>
+                          {(index === 0 ||
+                            new Date(m.createdAt).toDateString() !==
+                              new Date(
+                                currentMessages[index - 1].createdAt,
+                              ).toDateString()) && (
+                            <div className="slack-date-rule">
+                              <span>
+                                {new Date(m.createdAt).toLocaleDateString(
+                                  undefined,
+                                  {
+                                    month: 'long',
+                                    day: 'numeric',
+                                    year:
+                                      new Date(m.createdAt).getFullYear() ===
+                                      new Date().getFullYear()
+                                        ? undefined
+                                        : 'numeric',
+                                  },
+                                )}
+                              </span>
+                            </div>
+                          )}
+                          {messageCard(m)}
+                        </Fragment>
+                      ))}
+                    </>
+                  )}
+                </div>
+                {mode === 'home' && (
+                  <Composer
+                    key={roomId}
+                    roomId={roomId}
+                    parentId={null}
+                    name={room.recipient ? room.name : `#${room.name}`}
+                    rpc={rpc}
+                    refresh={refresh}
+                    onSent={() => {
+                      wasNearBottom.current = true;
+                      conversation.move({});
+                    }}
+                  />
                 )}
               </div>
-              {mode === 'home' && (
-                <Composer
-                  key={roomId}
-                  roomId={roomId}
-                  parentId={null}
-                  name={room.recipient ? room.name : `#${room.name}`}
-                  rpc={rpc}
-                  refresh={refresh}
-                  onSent={() => {
-                    wasNearBottom.current = true;
-                    conversation.move({});
-                  }}
-                />
-              )}
             </>
           ) : (
             <>
@@ -924,7 +1043,7 @@ function Slack() {
                     ? 'Direct messages'
                     : mode === 'activity'
                       ? 'Activity'
-                      : 'Later'}
+                      : 'Saved'}
                 </h1>
                 {mode === 'dms' && (
                   <IconButton

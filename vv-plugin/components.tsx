@@ -152,7 +152,7 @@ export function Toolbar({
         <MessageSquareText size={17} />
       </IconButton>
       <IconButton
-        label={saved ? 'Remove from Later' : 'Save for later'}
+        label={saved ? 'Remove from Saved' : 'Save for later'}
         onClick={onSave}
       >
         <Bookmark size={17} fill={saved ? 'currentColor' : 'none'} />
