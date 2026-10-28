@@ -2,6 +2,7 @@
 // Toolbar, ThreadBar and Editor. Convex/Next identities are supplied by VV.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import Quill from 'quill';
+import EmojiPicker, { EmojiStyle, Theme } from 'emoji-picker-react';
 import {
   ChevronDown,
   ChevronRight,
@@ -228,14 +229,28 @@ export function RichText({ message }: { message: Message }) {
 }
 type Delta = z.infer<typeof delta>;
 type FileData = z.infer<typeof file>;
+export function EmojiMenu({ onSelect }: { onSelect: (emoji: string) => void }) {
+  return (
+    <EmojiPicker
+      emojiStyle={EmojiStyle.NATIVE}
+      theme={Theme.LIGHT}
+      lazyLoadEmojis
+      width="100%"
+      height={360}
+      onEmojiClick={(data) => onSelect(data.emoji)}
+    />
+  );
+}
 export function Editor({
   placeholder,
   initial,
   onDraft,
   onSubmit,
+  editing = false,
 }: {
   placeholder: string;
   initial: Delta | null;
+  editing?: boolean;
   onDraft: (v: Delta | null) => void;
   onSubmit: (v: {
     text: string;
@@ -275,10 +290,11 @@ export function Editor({
       .onSubmit({
         id: submission.current,
         text: q.getText(),
-        rich: q.getContents() as Delta,
+        rich: { ops: q.getContents().ops } as Delta,
         attachment: state.current.attachment,
       })
       .then(() => {
+        if (!mount.current) return;
         q.setText('', 'silent');
         setText('');
         setAttachment(null);
@@ -297,7 +313,7 @@ export function Editor({
         setPending(false);
         state.current.pending = false;
         q.enable();
-        q.focus();
+        if (mount.current) q.focus();
       });
   };
   useEffect(() => {
@@ -331,6 +347,8 @@ export function Editor({
       q.setContents(initial as Parameters<Quill['setContents']>[0], 'silent');
     setText(q.getText());
     q.root.setAttribute('aria-label', placeholder);
+    q.root.setAttribute('role', 'textbox');
+    q.root.setAttribute('aria-multiline', 'true');
     q.root.setAttribute('aria-describedby', 'slack-composer-help');
     const names: Record<string, string> = {
       'ql-bold': 'Bold',
@@ -348,7 +366,7 @@ export function Editor({
     const change = () => {
       setText(q.getText());
       submission.current = crypto.randomUUID();
-      callbacks.current.onDraft(q.getContents() as Delta);
+      callbacks.current.onDraft({ ops: q.getContents().ops } as Delta);
     };
     q.on('text-change', change);
     return () => {
@@ -421,13 +439,15 @@ export function Editor({
             hidden
             onChange={(e) => void attach(e.target.files?.[0])}
           />
-          <IconButton
-            label="Attach file"
-            disabled={pending}
-            onClick={() => fileInput.current?.click()}
-          >
-            <Plus size={19} />
-          </IconButton>
+          {!editing && (
+            <IconButton
+              label="Attach file"
+              disabled={pending}
+              onClick={() => fileInput.current?.click()}
+            >
+              <Plus size={19} />
+            </IconButton>
+          )}
           <IconButton
             label="Insert emoji"
             aria-expanded={emojiOpen}
@@ -445,7 +465,7 @@ export function Editor({
             <span className="slack-composer-note">Aa</span>
           </IconButton>
           <IconButton
-            label="Send message"
+            label={editing ? 'Save changes' : 'Send message'}
             className="slack-send"
             disabled={pending || (!text.trim() && !attachment)}
             onClick={() => send.current()}
@@ -461,37 +481,18 @@ export function Editor({
             >
               <X size={14} />
             </IconButton>
-            {[
-              '🙂',
-              '👍',
-              '❤️',
-              '🎉',
-              '👀',
-              '🙌',
-              '✅',
-              '🚀',
-              '😂',
-              '💡',
-              '🙏',
-              '🔥',
-            ].map((emoji) => (
-              <IconButton
-                label={`Insert ${emoji}`}
-                key={emoji}
-                onClick={() => {
-                  const q = quill.current;
-                  if (q) {
-                    const at = q.getSelection(true)?.index ?? q.getLength() - 1;
-                    q.insertText(at, emoji, 'user');
-                    q.setSelection(at + emoji.length);
-                    q.focus();
-                  }
-                  setEmojiOpen(false);
-                }}
-              >
-                {emoji}
-              </IconButton>
-            ))}
+            <EmojiMenu
+              onSelect={(emoji) => {
+                const q = quill.current;
+                if (q) {
+                  const at = q.getSelection(true)?.index ?? q.getLength() - 1;
+                  q.insertText(at, emoji, 'user');
+                  q.setSelection(at + emoji.length);
+                  q.focus();
+                }
+                setEmojiOpen(false);
+              }}
+            />
           </div>
         )}
       </div>
@@ -501,8 +502,8 @@ export function Editor({
         </p>
       )}
       <div className="slack-composer-hint" id="slack-composer-help">
-        <strong>Enter</strong> to send · <strong>Shift + Enter</strong> for a
-        new line
+        <strong>Enter</strong> {editing ? 'to save' : 'to send'} ·{' '}
+        <strong>Shift + Enter</strong> for a new line
       </div>
     </div>
   );

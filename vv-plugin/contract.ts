@@ -98,7 +98,39 @@ export const message = z.object({
 export type Member = z.infer<typeof member>;
 export type Room = z.infer<typeof room>;
 export type Message = z.infer<typeof message>;
+export const assistantSession = z.object({
+  requestId: z.string().uuid(),
+  roomId: id,
+  threadId: id.nullable(),
+  error: z.string().nullable(),
+  sharedMessages: z.number().int().nonnegative(),
+});
+// The BB SDK validates environment and prompt details before dispatch.
+export const assistantRequest = z.object({
+  projectId: id,
+  providerId: id,
+  model: id,
+  reasoningLevel: z.string().max(80),
+  serviceTier: z.string().max(80).optional(),
+  permissionMode: z.enum(['accept-edits', 'auto', 'full']),
+  environment: z.json(),
+  input: z.array(z.json()).min(1).max(100),
+  executionInputSources: z.json(),
+  sessionOptions: z.json().optional(),
+});
 export const rpcContract = defineRpcContract({
+  assistant: {
+    input: z.object({ roomId: id }),
+    output: assistantSession.nullable(),
+  },
+  startAssistant: {
+    input: z.object({
+      requestId: z.string().uuid(),
+      roomId: id,
+      request: assistantRequest,
+    }),
+    output: assistantSession,
+  },
   snapshot: {
     input: z.object({ roomId: id.nullable().default(null) }),
     output: z.object({

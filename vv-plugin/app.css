@@ -1040,6 +1040,87 @@
   justify-self: end;
   height: 20px;
 }
+.slack-composer-emoji {
+  display: block;
+  width: 340px;
+  max-width: min(340px, calc(100vw - 40px));
+  padding: 4px;
+}
+.slack-composer-emoji > button:first-child {
+  display: flex;
+  margin-left: auto;
+}
+.slack-emoji-picker {
+  display: block;
+  padding: 8px 18px 18px;
+}
+.slack-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.slack-image-thumbnail {
+  display: block;
+  max-width: 340px;
+  padding: 0;
+  border: 1px solid #ddd !important;
+  border-radius: 7px;
+  overflow: hidden;
+}
+.slack-image-thumbnail img {
+  display: block;
+  max-width: 100%;
+  max-height: 250px;
+  object-fit: contain;
+}
+.slack-image-preview {
+  display: block;
+  max-width: 100%;
+  max-height: 65vh;
+  object-fit: contain;
+  margin: auto;
+}
+.slack-attachment > p {
+  font-size: 12px;
+}
+.slack-assistant {
+  flex-basis: 45%;
+  min-width: 440px;
+}
+.slack-assistant h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.slack-assistant-context {
+  padding: 12px 18px;
+  border-bottom: 1px solid #e5e5e5;
+  color: #616061;
+  font-size: 12px;
+}
+.slack-assistant-chat {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.slack-assistant-composer,
+.slack-assistant-loading {
+  padding: 22px 18px;
+}
+.slack-assistant-composer {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+.slack-assistant-composer h3 {
+  font-size: 21px;
+  margin-bottom: 8px;
+}
+.slack-assistant-composer > p {
+  color: #616061;
+  font-size: 14px;
+  margin-bottom: 24px;
+}
 @container (max-width:850px) {
   .slack-sidebar {
     width: 185px;

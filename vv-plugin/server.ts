@@ -2,16 +2,20 @@ import { z } from 'zod';
 import type { BbPluginApi } from '@get-bb/plugin-sdk';
 import { rpcContract, id, roomInput, sendInput } from './contract.ts';
 import { createStore } from './store.ts';
+import { createIntelligence } from './intelligence.ts';
 export { rpcContract } from './contract.ts';
 
 export default function plugin(bb: BbPluginApi) {
   const store = createStore(bb);
+  const intelligence = createIntelligence(bb, store);
   const changed = <T>(value: T): T => {
     bb.realtime.publish('changed', {});
     return value;
   };
   const human = store.actor().id;
   bb.rpc.register(rpcContract, {
+    assistant: (v) => intelligence.read(v.roomId),
+    startAssistant: (v) => intelligence.start(v),
     snapshot: (v) => store.snapshot(v.roomId, human),
     createRoom: (v) => changed(store.createRoom(v, human)),
     send: (v) => changed(store.send(v, human)),

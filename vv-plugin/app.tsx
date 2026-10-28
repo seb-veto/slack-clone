@@ -29,10 +29,10 @@ import {
   Pencil,
   Bot,
   Users,
-  Download,
   Check,
-  FileText,
+  Sparkles,
 } from 'lucide-react';
+import { Assistant } from './assistant.tsx';
 import type { z } from 'zod';
 import {
   rpcContract,
@@ -40,9 +40,12 @@ import {
   type Room,
   type Member,
   type delta,
+  type file,
 } from './contract.ts';
+import { Attachment } from './attachment.tsx';
 import {
   IconButton,
+  EmojiMenu,
   WorkspaceSection,
   ChannelHero,
   Toolbar,
@@ -76,6 +79,7 @@ function Dialog({
   useEffect(() => {
     const el = ref.current!;
     el.showModal();
+    el.querySelector<HTMLElement>('input,textarea,[contenteditable="true"]')?.focus();
     return () => el.close();
   }, []);
   return (
@@ -167,10 +171,19 @@ function Composer({
   );
 }
 function Slack() {
+  const [preview, setPreview] = useState<z.infer<typeof file> | null>(null);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const rpc = useRpc<typeof rpcContract>(),
     connection = useRealtimeConnectionState();
   const [data, setData] = useState<Snapshot | null>(null),
-    [roomId, setRoomId] = useState('general'),
+    [roomId, setRoomId] = useState(() => {
+      try {
+        const saved = localStorage.getItem('vv-slack:room');
+        return saved && saved.length <= 160 ? saved : 'general';
+      } catch {
+        return 'general';
+      }
+    }),
     [mode, setMode] = useState<Mode>('home'),
     [threadId, setThreadId] = useState<string | null>(null),
     [modal, setModal] = useState<Modal>(null),
@@ -180,22 +193,41 @@ function Slack() {
     [searched, setSearched] = useState(false),
     [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<Message | null>(null),
-    [editText, setEditText] = useState(''),
     [deleting, setDeleting] = useState<Message | null>(null),
     [reactionId, setReactionId] = useState<string | null>(null);
   const [roomName, setRoomName] = useState(''),
     [description, setDescription] = useState(''),
     [workspace, setWorkspace] = useState(''),
     [name, setName] = useState('');
-  const [history, setHistory] = useState(['general']),
+  const [history, setHistory] = useState([roomId]),
     [historyAt, setHistoryAt] = useState(0);
   const root = useRef<HTMLElement>(null),
     searchInput = useRef<HTMLInputElement>(null),
     scroll = useRef<HTMLDivElement>(null),
-    wasNearBottom = useRef(true);
+    wasNearBottom = useRef(true),
+    refreshVersion = useRef(0);
+  useEffect(() => {
+    try {
+      localStorage.setItem('vv-slack:room', roomId);
+    } catch {
+      /* Navigation still works when local storage is unavailable. */
+    }
+  }, [roomId]);
   const refresh = useCallback(async () => {
-    const next = await rpc.call('snapshot', { roomId });
-    setData(next);
+    const version = ++refreshVersion.current;
+    let next: Snapshot;
+    try {
+      next = await rpc.call('snapshot', { roomId });
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !error.message.includes('Conversation not available')
+      )
+        throw error;
+      next = await rpc.call('snapshot', { roomId: 'general' });
+      if (version === refreshVersion.current) setRoomId('general');
+    }
+    if (version === refreshVersion.current) setData(next);
   }, [rpc, roomId]);
   useEffect(() => {
     let live = true;
@@ -276,6 +308,7 @@ function Slack() {
         if (modal) return;
         setThreadId(null);
         setReactionId(null);
+        setAssistantOpen(false);
       }
     };
     const el = root.current;
@@ -369,20 +402,11 @@ function Slack() {
               <RichText message={m} />
               {m.editedAt && <span className="slack-edited">(edited)</span>}
               {m.attachment && (
-                <button
-                  className="slack-file"
-                  type="button"
-                  title="Download attachment"
-                  aria-describedby="slack-key-help"
-                  onClick={() => void download(m)}
-                >
-                  <FileText size={26} />
-                  <span>
-                    <strong>{m.attachment.name}</strong>
-                    <small>{m.attachment.mime}</small>
-                  </span>
-                  <Download size={16} />
-                </button>
+                <Attachment
+                  message={m}
+                  onDownload={() => void download(m)}
+                  onPreview={setPreview}
+                />
               )}
               <Reactions
                 message={m}
@@ -404,7 +428,6 @@ function Slack() {
                 saved={m.saved}
                 onEdit={() => {
                   setEditing(m);
-                  setEditText(m.text);
                 }}
                 onDelete={() => setDeleting(m)}
                 onThread={() => setThreadId(m.parentId ?? m.id)}
@@ -640,9 +663,21 @@ function Slack() {
                   <strong>{room.recipient ? room.name : room.name}</strong>
                   <ChevronDown size={15} />
                 </button>
-                <div className="slack-header-members">
-                  <Users size={16} />
-                  <span>{room.recipient ? 2 : data.members.length}</span>
+                <div className="slack-header-actions">
+                  <div className="slack-header-members">
+                    <Users size={16} />
+                    <span>{room.recipient ? 2 : data.members.length}</span>
+                  </div>
+                  <IconButton
+                    label="Ask about conversation"
+                    aria-pressed={assistantOpen}
+                    onClick={() => {
+                      setThreadId(null);
+                      setAssistantOpen(!assistantOpen);
+                    }}
+                  >
+                    <Sparkles size={19} />
+                  </IconButton>
                 </div>
               </header>
               <div className="slack-channel-tabs">
@@ -846,7 +881,22 @@ function Slack() {
             </div>
           )}
         </main>
-        {threadId && parent && (
+        {assistantOpen && room && (
+          <Assistant
+            key={roomId}
+            roomId={roomId}
+            name={room.recipient ? room.name : `#${room.name}`}
+            onClose={() => {
+              setAssistantOpen(false);
+              root.current
+                ?.querySelector<HTMLButtonElement>(
+                  '[aria-label="Ask about conversation"]',
+                )
+                ?.focus();
+            }}
+          />
+        )}
+        {!assistantOpen && threadId && parent && (
           <aside className="slack-thread" aria-label="Thread">
             <header className="slack-channel-header">
               <h2>
@@ -1146,46 +1196,46 @@ function Slack() {
           )}
         </Dialog>
       )}
+      {preview && (
+        <Dialog title={preview.name} onClose={() => setPreview(null)}>
+          <div className="slack-dialog-body">
+            <img
+              className="slack-image-preview"
+              src={`data:${preview.mime};base64,${preview.data}`}
+              alt={preview.name}
+            />
+          </div>
+        </Dialog>
+      )}
       {editing && (
         <Dialog title="Edit message" onClose={() => setEditing(null)}>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              setBusy(true);
-              void act(() =>
-                rpc.call('edit', {
+          <div className="slack-dialog-body">
+            <Editor
+              editing
+              placeholder="Edit message"
+              initial={
+                editing.rich ?? {
+                  ops: [
+                    {
+                      insert: editing.text.endsWith('\n')
+                        ? editing.text
+                        : editing.text + '\n',
+                    },
+                  ],
+                }
+              }
+              onDraft={() => {}}
+              onSubmit={async (value) => {
+                await rpc.call('edit', {
                   id: editing.id,
-                  text: editText,
-                  rich: null,
-                }),
-              )
-                .then((r) => {
-                  if (r) setEditing(null);
-                })
-                .finally(() => setBusy(false));
-            }}
-          >
-            <label>
-              Message
-              <textarea
-                autoFocus
-                required
-                maxLength={30000}
-                value={editText}
-                onChange={(e) => setEditText(e.target.value)}
-              />
-            </label>
-            <p>Saving this edit replaces the text and its formatting.</p>
-            <button
-              className="slack-primary"
-              title="Save message edit"
-              aria-describedby="slack-key-help"
-              disabled={busy}
-            >
-              Save changes
-            </button>
-            {error && <p role="alert">{error}</p>}
-          </form>
+                  text: value.text,
+                  rich: value.rich,
+                });
+                await refresh();
+                setEditing(null);
+              }}
+            />
+          </div>
         </Dialog>
       )}
       {deleting && (
@@ -1219,37 +1269,15 @@ function Slack() {
       {reactionId && (
         <Dialog title="Add a reaction" onClose={() => setReactionId(null)}>
           <div className="slack-emoji-picker">
-            {[
-              '👍',
-              '❤️',
-              '🎉',
-              '👀',
-              '🙌',
-              '✅',
-              '🚀',
-              '🙂',
-              '😂',
-              '💡',
-              '🙏',
-              '🔥',
-            ].map((emoji) => (
-              <button
-                type="button"
-                key={emoji}
-                title={`React ${emoji}`}
-                aria-label={`React ${emoji}`}
-                aria-describedby="slack-key-help"
-                onClick={() =>
-                  void act(() =>
-                    rpc.call('react', { id: reactionId, emoji }),
-                  ).then((r) => {
-                    if (r) setReactionId(null);
-                  })
-                }
-              >
-                {emoji}
-              </button>
-            ))}
+            <EmojiMenu
+              onSelect={(emoji) =>
+                void act(() =>
+                  rpc.call('react', { id: reactionId, emoji }),
+                ).then((result) => {
+                  if (result) setReactionId(null);
+                })
+              }
+            />
           </div>
         </Dialog>
       )}
