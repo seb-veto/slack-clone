@@ -1,4 +1,10 @@
 import {
+  recoverDraft,
+  retainDraft,
+  acknowledgeDraft,
+  type Draft,
+} from './draft-recovery.ts';
+import {
   Fragment,
   useCallback,
   useEffect,
@@ -209,16 +215,44 @@ function Composer({
     >(),
     [error, setError] = useState('');
   const queue = useRef<Promise<unknown>>(Promise.resolve());
+  function saveDraft(value: Draft) {
+    try {
+      retainDraft(localStorage, key, value);
+    } catch {
+      setError(
+        'Local draft recovery unavailable. Keep this conversation open until saved.',
+      );
+    }
+    queue.current = queue.current
+      .catch(() => {})
+      .then(() => rpc.call('draft', { key, value }))
+      .then(() => {
+        try {
+          acknowledgeDraft(localStorage, key, value);
+        } catch {
+          /* Keep the recovery copy. */
+        }
+        setError('');
+      })
+      .catch(() =>
+        setError('Draft could not be saved. Keep this conversation open.'),
+      );
+  }
   useEffect(() => {
     let live = true;
-    void rpc
-      .call('draft', { key })
-      .then((v) => {
-        if (live) setDraft(v);
-      })
-      .catch((e) => {
-        if (live) setError(String(e));
-      });
+    const recovered = recoverDraft(localStorage, key);
+    if (recovered) {
+      setDraft(recovered.value);
+      saveDraft(recovered.value);
+    } else
+      void rpc
+        .call('draft', { key })
+        .then((v) => {
+          if (live) setDraft(v);
+        })
+        .catch((e) => {
+          if (live) setError(String(e));
+        });
     return () => {
       live = false;
     };
@@ -234,17 +268,7 @@ function Composer({
       <Editor
         initial={draft}
         placeholder={parentId ? 'Reply…' : `Message ${name}`}
-        onDraft={(value) => {
-          queue.current = queue.current
-            .catch(() => {})
-            .then(() => rpc.call('draft', { key, value }))
-            .then(() => setError(''))
-            .catch(() =>
-              setError(
-                'Draft could not be saved. Keep this conversation open.',
-              ),
-            );
-        }}
+        onDraft={saveDraft}
         onSubmit={async (v) => {
           await rpc.call('send', { ...v, roomId, parentId });
           onSent();
@@ -480,7 +504,7 @@ function Slack() {
       if (!root.current?.contains(event.target as Node)) return;
       if (
         (event.metaKey || event.ctrlKey) &&
-        ['b', 'i'].includes(event.key.toLowerCase()) &&
+        ['b', 'i', 'u'].includes(event.key.toLowerCase()) &&
         (event.target as HTMLElement).closest('.ql-editor')
       )
         event.stopPropagation();
@@ -1472,8 +1496,8 @@ function Slack() {
                 <dd>Enter</dd>
                 <dt>New line</dt>
                 <dd>Shift Enter</dd>
-                <dt>Bold / italic</dt>
-                <dd>⌘ / Ctrl B / I</dd>
+                <dt>Bold / italic / underline</dt>
+                <dd>⌘ / Ctrl B / I / U</dd>
                 <dt>Move between controls</dt>
                 <dd>Tab / Shift Tab</dd>
                 <dt>Activate a control</dt>
@@ -1483,8 +1507,10 @@ function Slack() {
               </dl>
               <p>
                 Hover or focus a message for reactions, replies, saving and your
-                own edit/delete actions. Draft text is saved as you type. Files
-                up to 2 MB can be attached.
+                own edit/delete actions. Format selected text or what you type
+                next; lists, quotes and code blocks format the current line.
+                Draft text is saved as you type. Files up to 2 MB can be
+                attached.
               </p>
               <p>
                 Built from the MIT-licensed Slack Clone by Sanidhya Kumar Verma.

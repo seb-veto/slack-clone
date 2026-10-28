@@ -688,7 +688,11 @@
   background: #f8f8f8;
   border-radius: 8px 8px 0 0;
   padding: 6px 8px;
-  height: 34px;
+  height: auto;
+  min-height: 34px;
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 2px;
 }
 .vv-slack .ql-toolbar.ql-snow .ql-formats {
   margin-right: 7px;
@@ -1463,3 +1467,39 @@
   margin: 18px 0;
 }
 .slack-profile-explanation { color: var(--slack-muted); font-size: 13px; }
+
+.slack-rich-blocks {
+  white-space: pre-wrap;
+}
+.slack-rich-blocks ol,
+.slack-rich-blocks ul {
+  margin: 0;
+  padding-inline-start: 24px;
+}
+.slack-rich-blocks ol {
+  list-style-type: decimal;
+}
+.slack-rich-blocks ul {
+  list-style-type: disc;
+}
+.slack-rich-blocks blockquote {
+  margin: 0;
+  padding: 0 12px;
+  border-left: 4px solid #ddd;
+}
+.slack-rich-blocks pre {
+  margin: 4px 0;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #f8f8f8;
+  overflow: auto;
+  white-space: pre;
+}
+.slack-rich-blocks pre code {
+  color: inherit;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
+}

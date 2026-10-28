@@ -11,13 +11,16 @@ const attributes = z
   .object({
     bold: z.boolean().optional(),
     italic: z.boolean().optional(),
+    underline: z.boolean().optional(),
+    blockquote: z.boolean().optional(),
+    indent: z.number().int().min(0).max(8).optional(),
     strike: z.boolean().optional(),
     code: z.boolean().optional(),
     link: z
       .string()
       .max(2048)
       .url()
-      .regex(/^https?:\/\//)
+      .regex(/^https?:\/\//i)
       .optional(),
     list: z.enum(['ordered', 'bullet']).optional(),
     'code-block': z.union([z.boolean(), z.string().max(30)]).optional(),

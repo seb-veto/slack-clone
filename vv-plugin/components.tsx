@@ -204,29 +204,7 @@ export function ThreadBar({
     </button>
   ) : null;
 }
-export function RichText({ message }: { message: Message }) {
-  if (!message.rich)
-    return <div className="slack-message-text">{message.text}</div>;
-  return (
-    <div className="slack-message-text">
-      {message.rich.ops.map((op, i) => {
-        let content: ReactNode = op.insert;
-        const a = op.attributes;
-        if (a?.bold) content = <strong>{content}</strong>;
-        if (a?.italic) content = <em>{content}</em>;
-        if (a?.strike) content = <s>{content}</s>;
-        if (a?.code) content = <code>{content}</code>;
-        if (a?.link && /^https?:\/\//.test(a.link))
-          content = (
-            <a href={a.link} target="_blank" rel="noreferrer">
-              {content}
-            </a>
-          );
-        return <span key={i}>{content}</span>;
-      })}
-    </div>
-  );
-}
+export { RichText } from './rich-text.tsx';
 type Delta = z.infer<typeof delta>;
 type FileData = z.infer<typeof file>;
 export function EmojiMenu({ onSelect }: { onSelect: (emoji: string) => void }) {
@@ -271,8 +249,8 @@ export function Editor({
     [error, setError] = useState('');
   const [emojiOpen, setEmojiOpen] = useState(false),
     [formatting, setFormatting] = useState(true);
-  const state = useRef({ attachment, pending });
-  state.current = { attachment, pending };
+  const state = useRef({ attachment, pending, emojiOpen });
+  state.current = { attachment, pending, emojiOpen };
   const send = useRef<() => void>(() => {});
   send.current = () => {
     const q = quill.current;
@@ -322,11 +300,25 @@ export function Editor({
     const q = new Quill(host, {
       theme: 'snow',
       placeholder,
-      formats: ['bold', 'italic', 'strike', 'code', 'link'],
+      formats: [
+        'bold',
+        'italic',
+        'underline',
+        'strike',
+        'code',
+        'link',
+        'list',
+        'indent',
+        'blockquote',
+        'code-block',
+      ],
       modules: {
         toolbar: [
-          ['bold', 'italic', 'strike'],
-          ['code', 'link'],
+          ['bold', 'italic', 'underline', 'strike'],
+          ['link'],
+          [{ list: 'ordered' }, { list: 'bullet' }],
+          ['blockquote'],
+          ['code', 'code-block'],
         ],
         keyboard: {
           bindings: {
@@ -353,16 +345,58 @@ export function Editor({
     const names: Record<string, string> = {
       'ql-bold': 'Bold',
       'ql-italic': 'Italic',
+      'ql-underline': 'Underline',
+      'ql-blockquote': 'Quote',
+      'ql-code-block': 'Code block',
       'ql-strike': 'Strikethrough',
       'ql-code': 'Inline code',
       'ql-link': 'Insert link',
     };
     mount.current.querySelectorAll('button').forEach((b) => {
-      const label = names[b.className] ?? 'Format text';
+      const label = b.classList.contains('ql-list')
+        ? b.value === 'ordered'
+          ? 'Numbered list'
+          : 'Bulleted list'
+        : (names[b.className] ?? 'Format text');
       b.setAttribute('aria-label', label);
       b.title = label;
       b.setAttribute('aria-describedby', 'slack-key-help');
     });
+    const tooltip = mount.current.querySelector<HTMLElement>('.ql-tooltip');
+    tooltip?.querySelector('input')?.setAttribute('aria-label', 'Link URL');
+    tooltip
+      ?.querySelectorAll<HTMLElement>('.ql-action, .ql-remove')
+      .forEach((action) => {
+        const label = action.classList.contains('ql-remove')
+          ? 'Remove link'
+          : 'Edit or save link';
+        action.setAttribute('role', 'button');
+        action.tabIndex = 0;
+        action.setAttribute('aria-label', label);
+        action.title = label;
+        action.setAttribute('aria-describedby', 'slack-key-help');
+        action.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            action.click();
+          }
+        });
+      });
+    const wrapper = mount.current.closest('.slack-composer-wrap');
+    const dismiss = (event: Event) => {
+      if ((event as KeyboardEvent).key !== 'Escape') return;
+      if (
+        state.current.emojiOpen ||
+        (tooltip && !tooltip.classList.contains('ql-hidden'))
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        tooltip?.classList.add('ql-hidden');
+        setEmojiOpen(false);
+        q.focus();
+      }
+    };
+    wrapper?.addEventListener('keydown', dismiss, true);
     const change = () => {
       setText(q.getText());
       submission.current = crypto.randomUUID();
@@ -371,6 +405,7 @@ export function Editor({
     q.on('text-change', change);
     return () => {
       q.off('text-change', change);
+      wrapper?.removeEventListener('keydown', dismiss, true);
       quill.current = null;
       mount.current?.replaceChildren();
     };
