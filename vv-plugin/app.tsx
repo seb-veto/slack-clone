@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useRef,
@@ -33,12 +34,14 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { Assistant } from './assistant.tsx';
+import { useConversationHistory } from './history.ts';
 import type { z } from 'zod';
 import {
   rpcContract,
   type Message,
   type Room,
   type Member,
+  type HistoryPage,
   type delta,
   type file,
 } from './contract.ts';
@@ -64,7 +67,13 @@ type Snapshot = {
 };
 type Mode = 'home' | 'dms' | 'activity' | 'saved' | 'threads';
 type Modal =
-  'channel' | 'dm' | 'settings' | 'help' | 'details' | 'search' | null;
+  | 'channel'
+  | 'dm'
+  | 'settings'
+  | 'help'
+  | 'details'
+  | 'search'
+  | null;
 
 function Dialog({
   title,
@@ -79,7 +88,9 @@ function Dialog({
   useEffect(() => {
     const el = ref.current!;
     el.showModal();
-    el.querySelector<HTMLElement>('input,textarea,[contenteditable="true"]')?.focus();
+    el.querySelector<HTMLElement>(
+      'input,textarea,[contenteditable="true"]',
+    )?.focus();
     return () => el.close();
   }, []);
   return (
@@ -102,18 +113,72 @@ function Dialog({
     </dialog>
   );
 }
+function HistoryNavigation({
+  page,
+  name,
+  onMove,
+}: {
+  page: HistoryPage | null;
+  name: string;
+  onMove: (cursor: { before?: string; after?: string }) => void;
+}) {
+  if (!page) return <p role="status">Loading messages…</p>;
+  if (!page.before && !page.after) return null;
+  return (
+    <nav
+      className="slack-history-navigation"
+      aria-label={`${name} message history`}
+    >
+      {page.before && (
+        <button
+          type="button"
+          title="Load older messages"
+          aria-label={`Load older ${name} messages`}
+          aria-describedby="slack-key-help"
+          onClick={() => onMove({ before: page.before! })}
+        >
+          Older messages
+        </button>
+      )}
+      {page.after && (
+        <>
+          <button
+            type="button"
+            title="Load newer messages"
+            aria-label={`Load newer ${name} messages`}
+            aria-describedby="slack-key-help"
+            onClick={() => onMove({ after: page.after! })}
+          >
+            Newer messages
+          </button>
+          <button
+            type="button"
+            title="Jump to present"
+            aria-label={`Jump to present in ${name}`}
+            aria-describedby="slack-key-help"
+            onClick={() => onMove({})}
+          >
+            Jump to present
+          </button>
+        </>
+      )}
+    </nav>
+  );
+}
 function Composer({
   roomId,
   parentId,
   name,
   rpc,
   refresh,
+  onSent,
 }: {
   roomId: string;
   parentId: string | null;
   name: string;
   rpc: ReturnType<typeof useRpc<typeof rpcContract>>;
   refresh: () => Promise<void>;
+  onSent: () => void;
 }) {
   const key = `${roomId}|${parentId ?? 'main'}`;
   const [draft, setDraft] = useState<
@@ -159,6 +224,7 @@ function Composer({
         }}
         onSubmit={async (v) => {
           await rpc.call('send', { ...v, roomId, parentId });
+          onSent();
           await refresh();
         }}
       />
@@ -188,6 +254,7 @@ function Slack() {
     [threadId, setThreadId] = useState<string | null>(null),
     [modal, setModal] = useState<Modal>(null),
     [error, setError] = useState('');
+  const conversation = useConversationHistory(rpc, roomId, threadId);
   const [query, setQuery] = useState(''),
     [results, setResults] = useState<Message[]>([]),
     [searched, setSearched] = useState(false),
@@ -204,7 +271,11 @@ function Slack() {
   const root = useRef<HTMLElement>(null),
     searchInput = useRef<HTMLInputElement>(null),
     scroll = useRef<HTMLDivElement>(null),
+    replyScroll = useRef<HTMLDivElement>(null),
     wasNearBottom = useRef(true),
+    repliesNearBottom = useRef(true),
+    positionedPage = useRef(''),
+    positionedThread = useRef<string | null>(null),
     refreshVersion = useRef(0);
   useEffect(() => {
     try {
@@ -225,10 +296,17 @@ function Slack() {
       )
         throw error;
       next = await rpc.call('snapshot', { roomId: 'general' });
-      if (version === refreshVersion.current) setRoomId('general');
+      if (version === refreshVersion.current) {
+        setRoomId('general');
+        setThreadId(null);
+        setData(next);
+      }
+      return;
     }
+    if (version !== refreshVersion.current) return;
+    await conversation.refresh();
     if (version === refreshVersion.current) setData(next);
-  }, [rpc, roomId]);
+  }, [rpc, roomId, conversation.refresh]);
   useEffect(() => {
     let live = true;
     void refresh().catch((e) => {
@@ -248,9 +326,8 @@ function Slack() {
   const room = data?.rooms.find((r) => r.id === roomId),
     memberName = (id: string) =>
       data?.members.find((m) => m.id === id)?.name ?? 'Teammate';
-  const currentMessages =
-    data?.messages.filter((m) => m.roomId === roomId) ?? [];
-  const parent = currentMessages.find((m) => m.id === threadId);
+  const currentMessages = conversation.messages;
+  const parent = conversation.parent;
   const unread = data?.rooms.reduce((n, r) => n + r.unread, 0) ?? 0;
   useEffect(() => {
     if (
@@ -262,15 +339,44 @@ function Slack() {
       void rpc
         .call('markRead', {
           roomId,
-          through: Math.max(...currentMessages.map((m) => m.createdAt)),
+          through: Math.max(
+            ...[...currentMessages, ...conversation.replies].map(
+              (m) => m.createdAt,
+            ),
+          ),
         })
         .catch(() => {});
     }
-  }, [roomId, data, mode, rpc]);
+  }, [roomId, data, conversation.page, conversation.threadPage, mode, rpc]);
   useEffect(() => {
-    if (scroll.current && wasNearBottom.current)
+    if (!scroll.current || !conversation.page) return;
+    if (conversation.anchor && positionedPage.current !== conversation.key) {
+      scroll.current
+        .querySelector<HTMLElement>(
+          `[data-message-id="${CSS.escape(conversation.anchor)}"]`,
+        )
+        ?.scrollIntoView({ block: 'center' });
+      wasNearBottom.current = false;
+    } else if (wasNearBottom.current) {
       scroll.current.scrollTop = scroll.current.scrollHeight;
-  }, [data?.messages.length, roomId]);
+    }
+    positionedPage.current = conversation.key;
+  }, [conversation.page, roomId]);
+  useEffect(() => {
+    if (!replyScroll.current || !conversation.threadPage) return;
+    const changed = positionedThread.current !== conversation.threadKey;
+    if (changed && conversation.replyAnchor) {
+      replyScroll.current
+        .querySelector<HTMLElement>(
+          `[data-message-id="${CSS.escape(conversation.replyAnchor)}"]`,
+        )
+        ?.scrollIntoView({ block: 'center' });
+      repliesNearBottom.current = false;
+    } else if (changed || repliesNearBottom.current) {
+      replyScroll.current.scrollTop = replyScroll.current.scrollHeight;
+    }
+    positionedThread.current = conversation.threadKey;
+  }, [conversation.threadPage]);
   const navigate = (id: string) => {
     if (id !== roomId) {
       const next = history.slice(0, historyAt + 1);
@@ -279,7 +385,9 @@ function Slack() {
       setHistoryAt(next.length - 1);
     }
     setRoomId(id);
+    conversation.move({});
     setThreadId(null);
+    positionedThread.current = null;
     setMode('home');
     wasNearBottom.current = true;
   };
@@ -289,8 +397,17 @@ function Slack() {
     setHistoryAt(at);
     setRoomId(history[at]);
     setThreadId(null);
+    positionedThread.current = null;
     setMode('home');
+    conversation.move({});
+    wasNearBottom.current = true;
   };
+  function jumpToMessage(message: Message) {
+    navigate(message.roomId);
+    conversation.locate(message);
+    setThreadId(message.parentId);
+    setAssistantOpen(false);
+  }
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!root.current?.contains(event.target as Node)) return;
@@ -361,12 +478,12 @@ function Slack() {
     });
   }
   function messageCard(m: Message, inThread = false) {
-    const author = data?.members.find((a) => a.id === m.author),
-      replies = currentMessages.filter((x) => x.parentId === m.id);
+    const author = data?.members.find((a) => a.id === m.author);
     return (
       <article
         className={`slack-message ${m.deleted ? 'slack-deleted' : ''}`}
         key={m.id}
+        data-message-id={m.id}
         aria-label={`Message from ${author?.name ?? 'teammate'}`}
       >
         <div
@@ -417,10 +534,13 @@ function Slack() {
               />
               {!inThread && (
                 <ThreadBar
-                  count={replies.length}
-                  name={memberName(replies.at(-1)?.author ?? m.author)}
-                  timestamp={replies.at(-1)?.createdAt ?? m.createdAt}
-                  onClick={() => setThreadId(m.id)}
+                  count={m.replyCount}
+                  name={memberName(m.lastReply?.author ?? m.author)}
+                  timestamp={m.lastReply?.createdAt ?? m.createdAt}
+                  onClick={() => {
+                    setAssistantOpen(false);
+                    setThreadId(m.id);
+                  }}
                 />
               )}
               <Toolbar
@@ -430,7 +550,10 @@ function Slack() {
                   setEditing(m);
                 }}
                 onDelete={() => setDeleting(m)}
-                onThread={() => setThreadId(m.parentId ?? m.id)}
+                onThread={() => {
+                  setAssistantOpen(false);
+                  setThreadId(m.parentId ?? m.id);
+                }}
                 onReaction={() => setReactionId(m.id)}
                 onSave={() => void act(() => rpc.call('save', { id: m.id }))}
               />
@@ -698,19 +821,25 @@ function Slack() {
                       90;
                 }}
               >
+                <HistoryNavigation
+                  page={conversation.page}
+                  name="channel"
+                  onMove={(cursor) => {
+                    wasNearBottom.current = !cursor.after;
+                    if (cursor.after && scroll.current)
+                      scroll.current.scrollTop = 0;
+                    conversation.move(cursor);
+                  }}
+                />
                 {mode === 'threads' ? (
                   <>
                     <h2 className="slack-list-title">
                       Threads in {room.recipient ? room.name : `#${room.name}`}
                     </h2>
                     {currentMessages
-                      .filter(
-                        (m) =>
-                          !m.parentId &&
-                          currentMessages.some((r) => r.parentId === m.id),
-                      )
+                      .filter((m) => !m.parentId && m.replyCount > 0)
                       .map((m) => messageCard(m))}
-                    {!currentMessages.some((m) => m.parentId) && (
+                    {!currentMessages.some((m) => m.replyCount > 0) && (
                       <div className="slack-empty">
                         <MessageSquareText size={36} />
                         <h2>A little more room to talk</h2>
@@ -723,39 +852,52 @@ function Slack() {
                   </>
                 ) : (
                   <>
-                    {room.recipient ? (
-                      <div className="slack-hero">
-                        <div className="slack-avatar slack-avatar-agent">
-                          <Bot size={30} />
+                    {conversation.page?.before === null &&
+                      (room.recipient ? (
+                        <div className="slack-hero">
+                          <div className="slack-avatar slack-avatar-agent">
+                            <Bot size={30} />
+                          </div>
+                          <h1>{room.name}</h1>
+                          <p>
+                            This conversation is between you and {room.name}.
+                            Messages stay in VV.
+                          </p>
                         </div>
-                        <h1>{room.name}</h1>
-                        <p>
-                          This conversation is between you and {room.name}.
-                          Messages stay in VV.
-                        </p>
-                      </div>
-                    ) : (
-                      <ChannelHero
-                        name={room.name}
-                        description={room.description}
-                        createdAt={room.createdAt}
-                      />
-                    )}
-                    <div className="slack-date-rule">
-                      <span>
-                        {currentMessages.length
-                          ? new Date(
-                              currentMessages[0].createdAt,
-                            ).toLocaleDateString(undefined, {
-                              month: 'long',
-                              day: 'numeric',
-                            })
-                          : 'Today'}
-                      </span>
-                    </div>
-                    {currentMessages
-                      .filter((m) => !m.parentId)
-                      .map((m) => messageCard(m))}
+                      ) : (
+                        <ChannelHero
+                          name={room.name}
+                          description={room.description}
+                          createdAt={room.createdAt}
+                        />
+                      ))}
+                    {currentMessages.map((m, index) => (
+                      <Fragment key={m.id}>
+                        {(index === 0 ||
+                          new Date(m.createdAt).toDateString() !==
+                            new Date(
+                              currentMessages[index - 1].createdAt,
+                            ).toDateString()) && (
+                          <div className="slack-date-rule">
+                            <span>
+                              {new Date(m.createdAt).toLocaleDateString(
+                                undefined,
+                                {
+                                  month: 'long',
+                                  day: 'numeric',
+                                  year:
+                                    new Date(m.createdAt).getFullYear() ===
+                                    new Date().getFullYear()
+                                      ? undefined
+                                      : 'numeric',
+                                },
+                              )}
+                            </span>
+                          </div>
+                        )}
+                        {messageCard(m)}
+                      </Fragment>
+                    ))}
                   </>
                 )}
               </div>
@@ -767,6 +909,10 @@ function Slack() {
                   name={room.recipient ? room.name : `#${room.name}`}
                   rpc={rpc}
                   refresh={refresh}
+                  onSent={() => {
+                    wasNearBottom.current = true;
+                    conversation.move({});
+                  }}
                 />
               )}
             </>
@@ -800,8 +946,7 @@ function Slack() {
                           title="Open conversation"
                           aria-describedby="slack-key-help"
                           onClick={() => {
-                            navigate(m.roomId);
-                            setThreadId(m.parentId ?? null);
+                            jumpToMessage(m);
                           }}
                         >
                           Open conversation →
@@ -910,15 +1055,27 @@ function Slack() {
                 <X size={20} />
               </IconButton>
             </header>
-            <div className="slack-message-scroll">
+            <div
+              className="slack-message-scroll"
+              ref={replyScroll}
+              onScroll={() => {
+                const el = replyScroll.current;
+                if (el)
+                  repliesNearBottom.current =
+                    el.scrollHeight - el.scrollTop - el.clientHeight < 90;
+              }}
+            >
               {messageCard(parent, true)}
               <div className="slack-reply-rule">
-                {currentMessages.filter((m) => m.parentId === parent.id).length}{' '}
-                replies
+                {parent.replyCount}{' '}
+                {parent.replyCount === 1 ? 'reply' : 'replies'}
               </div>
-              {currentMessages
-                .filter((m) => m.parentId === parent.id)
-                .map((m) => messageCard(m, true))}
+              <HistoryNavigation
+                page={conversation.threadPage}
+                name="thread"
+                onMove={conversation.moveThread}
+              />
+              {conversation.replies.map((m) => messageCard(m, true))}
             </div>
             <Composer
               key={threadId}
@@ -927,6 +1084,10 @@ function Slack() {
               name="thread"
               rpc={rpc}
               refresh={refresh}
+              onSent={() => {
+                repliesNearBottom.current = true;
+                conversation.moveThread({});
+              }}
             />
           </aside>
         )}
@@ -1177,8 +1338,7 @@ function Slack() {
                     className="slack-search-result"
                     key={m.id}
                     onClick={() => {
-                      navigate(m.roomId);
-                      setThreadId(m.parentId);
+                      jumpToMessage(m);
                       setModal(null);
                     }}
                   >

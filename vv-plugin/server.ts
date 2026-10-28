@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import type { BbPluginApi } from '@get-bb/plugin-sdk';
-import { rpcContract, id, roomInput, sendInput } from './contract.ts';
+import {
+  rpcContract,
+  id,
+  roomInput,
+  sendInput,
+  historyInput,
+} from './contract.ts';
 import { createStore } from './store.ts';
 import { createIntelligence } from './intelligence.ts';
 export { rpcContract } from './contract.ts';
@@ -14,6 +20,7 @@ export default function plugin(bb: BbPluginApi) {
   };
   const human = store.actor().id;
   bb.rpc.register(rpcContract, {
+    history: (v) => store.history(v, human),
     assistant: (v) => intelligence.read(v.roomId),
     startAssistant: (v) => intelligence.start(v),
     snapshot: (v) => store.snapshot(v.roomId, human),
@@ -33,6 +40,7 @@ export default function plugin(bb: BbPluginApi) {
   const operations = z.discriminatedUnion('action', [
     z.object({ action: z.literal('channels') }),
     z.object({ action: z.literal('read'), roomId: id }),
+    z.object({ action: z.literal('history'), ...historyInput.shape }),
     z.object({ action: z.literal('create'), ...roomInput.shape }),
     z.object({ action: z.literal('send'), ...sendInput.shape }),
     z.object({
@@ -55,6 +63,8 @@ export default function plugin(bb: BbPluginApi) {
         return { rooms: store.listRooms(who), me: store.actor(threadId) };
       case 'read':
         return store.snapshot(input.roomId, who);
+      case 'history':
+        return store.history(input, who);
       case 'create':
         return changed(store.createRoom(input, who));
       case 'send':
@@ -68,7 +78,7 @@ export default function plugin(bb: BbPluginApi) {
   bb.agents.registerTool({
     name: 'vv_slack',
     description:
-      'Use VV Slack: list channels, read conversations, create channels or DMs, search, send messages or threaded replies, and toggle reactions. Local VV workspace only. Use a stable UUID for each send; reuse it only for an identical uncertain submission. Your author identity is your actual BB thread. Messages do not automatically run another agent.',
+      'Use VV Slack: list channels, read or page through conversation and thread history, create channels or DMs, search, send messages or threaded replies, and toggle reactions. history returns up to 100 messages with before/after cursors; parentId reads replies; around locates a message. Local VV workspace only. Use a stable UUID for each send; reuse it only for an identical uncertain submission. Your author identity is your actual BB thread. Messages do not automatically run another agent.',
     parameters: operations,
     execute: (input, context) =>
       JSON.stringify(execute(input, context.threadId)),
@@ -89,7 +99,7 @@ export default function plugin(bb: BbPluginApi) {
         return {
           exitCode: 0,
           stdout:
-            'bb slack call --input <JSON> [--json]\nActions: channels, read {roomId}, create {name,description?,recipient?}, send {id,roomId,text,parentId?,rich?,attachment?}, search {query}, react {id,emoji}.\nA send requires a UUID; retry an uncertain send with the same ID and identical content. Local VV only. No agent starts automatically.',
+            'bb slack call --input <JSON> [--json]\nActions: channels, read {roomId}, history {roomId,parentId?,before?|after?|around?}, create {name,description?,recipient?}, send {id,roomId,text,parentId?,rich?,attachment?}, search {query}, react {id,emoji}.\nHistory returns 100 messages and before/after cursors. A send requires a UUID; retry an uncertain send with the same ID and identical content. Local VV only. No agent starts automatically.',
         };
       try {
         const index = argv.indexOf('--input');

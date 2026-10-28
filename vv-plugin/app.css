@@ -82,6 +82,28 @@
   justify-content: flex-end;
   flex-shrink: 0;
 }
+.slack-history-navigation {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #fff;
+  border-bottom: 1px solid var(--slack-border);
+}
+.slack-history-navigation button {
+  padding: 4px 8px;
+  border: 1px solid var(--slack-border);
+  border-radius: 5px;
+  color: #1264a3;
+  font-size: 13px;
+}
+.slack-history-navigation button:hover {
+  background: #f4f8fb;
+}
 .slack-top-search {
   display: flex;
   align-items: center;

@@ -7,6 +7,7 @@ import {
   message,
   roomInput,
   sendInput,
+  historyInput,
   type Message,
   type Member,
   type Room,
@@ -24,11 +25,13 @@ export function createStore(bb: BbPluginApi) {
      CREATE TABLE reads (roomId TEXT NOT NULL, memberId TEXT NOT NULL, through INTEGER NOT NULL, PRIMARY KEY(roomId,memberId));
      CREATE TABLE drafts (key TEXT NOT NULL, memberId TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(key,memberId));
      CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
+    'CREATE INDEX message_parent ON messages(parentId,roomId,createdAt);',
   ]);
   const getSetting = (key: string) =>
     (
       db.prepare('SELECT value FROM settings WHERE key=?').get(key) as
-        { value: string } | undefined
+        | { value: string }
+        | undefined
     )?.value;
   function actor(threadId?: string | null): Member {
     const memberId = threadId ? `agent:${threadId}` : 'human';
@@ -52,14 +55,16 @@ export function createStore(bb: BbPluginApi) {
   );
   function access(roomId: string, who: string) {
     const row = db.prepare('SELECT * FROM rooms WHERE id=?').get(roomId) as
-      (Room & { creator: string }) | undefined;
+      | (Room & { creator: string })
+      | undefined;
     if (!row || (row.recipient && row.recipient !== who && row.creator !== who))
       throw new Error('Conversation not available.');
     return row;
   }
   const raw = (id: string) =>
     db.prepare('SELECT * FROM messages WHERE id=?').get(id) as
-      Record<string, unknown> | undefined;
+      | Record<string, unknown>
+      | undefined;
   function readMessage(id: string, who: string): Message {
     const row = raw(id);
     if (!row) throw new Error('Message not found.');
@@ -86,6 +91,18 @@ export function createStore(bb: BbPluginApi) {
         ? { name: attachment.name, mime: attachment.mime }
         : null,
       reactions,
+      replyCount: (
+        db
+          .prepare('SELECT COUNT(*) AS count FROM messages WHERE parentId=?')
+          .get(id) as { count: number }
+      ).count,
+      lastReply:
+        (db
+          .prepare(
+            'SELECT author,createdAt FROM messages WHERE parentId=? ORDER BY createdAt DESC,rowid DESC LIMIT 1',
+          )
+          .get(id) as { author: string; createdAt: number } | undefined) ??
+        null,
       saved: !!db
         .prepare('SELECT 1 FROM saved WHERE messageId=? AND memberId=?')
         .get(id, who),
@@ -221,12 +238,71 @@ export function createStore(bb: BbPluginApi) {
     createRoom,
     send,
     readMessage,
+    history(input: z.input<typeof historyInput>, who: string) {
+      const v = historyInput.parse(input);
+      access(v.roomId, who);
+      const parent = v.parentId ? readMessage(v.parentId, who) : null;
+      if (parent && (parent.roomId !== v.roomId || parent.parentId))
+        throw new Error('Choose a top-level message in this conversation.');
+      type Row = { id: string; createdAt: number; seq: number };
+      const cursor = v.before ?? v.after ?? v.around;
+      const anchor = cursor
+        ? (db
+            .prepare(
+              'SELECT id,roomId,parentId,createdAt,rowid AS seq FROM messages WHERE id=?',
+            )
+            .get(cursor) as
+            | (Row & { roomId: string; parentId: string | null })
+            | undefined)
+        : undefined;
+      if (
+        cursor &&
+        (!anchor ||
+          anchor.roomId !== v.roomId ||
+          anchor.parentId !== (v.parentId ?? null))
+      )
+        throw new Error('History cursor not available in this conversation.');
+      const select = (direction: '<' | '<=' | '>', limit: number): Row[] => {
+        const where = anchor ? `AND (createdAt,rowid) ${direction} (?,?)` : '';
+        return db
+          .prepare(
+            `SELECT id,createdAt,rowid AS seq FROM messages WHERE roomId=? AND parentId IS ? ${where} ORDER BY createdAt ${direction === '>' ? 'ASC' : 'DESC'},rowid ${direction === '>' ? 'ASC' : 'DESC'} LIMIT ?`,
+          )
+          .all(
+            v.roomId,
+            v.parentId ?? null,
+            ...(anchor ? [anchor.createdAt, anchor.seq] : []),
+            limit,
+          ) as Row[];
+      };
+      const rows = v.around
+        ? [...select('<=', 51).reverse(), ...select('>', 49)]
+        : v.after
+          ? select('>', 100)
+          : select('<', 100).reverse();
+      const edge = (row: Row | undefined, direction: '<' | '>') => {
+        if (!row) return null;
+        return db
+          .prepare(
+            `SELECT 1 FROM messages WHERE roomId=? AND parentId IS ? AND (createdAt,rowid) ${direction} (?,?) LIMIT 1`,
+          )
+          .get(v.roomId, v.parentId ?? null, row.createdAt, row.seq)
+          ? row.id
+          : null;
+      };
+      return {
+        messages: rows.map((row) => readMessage(row.id, who)),
+        parent,
+        before: edge(rows[0], '<'),
+        after: edge(rows.at(-1), '>'),
+      };
+    },
     snapshot(roomId: string | null, who: string) {
       if (roomId) access(roomId, who);
       const ids = roomId
         ? (db
             .prepare(
-              'SELECT id FROM (SELECT id,createdAt FROM messages WHERE roomId=? ORDER BY createdAt DESC,rowid DESC LIMIT 300) ORDER BY createdAt,id',
+              'SELECT id FROM (SELECT id,createdAt,rowid AS seq FROM messages WHERE roomId=? ORDER BY createdAt DESC,rowid DESC LIMIT 300) ORDER BY createdAt,seq',
             )
             .all(roomId) as { id: string }[])
         : [];
@@ -301,19 +377,15 @@ export function createStore(bb: BbPluginApi) {
       return readMessage(id, who);
     },
     search(query: string, saved: boolean, who: string) {
-      const roomIds = new Set(listRooms(who).map((r) => r.id));
       return (
         db
           .prepare(
-            `SELECT id,roomId FROM messages WHERE deleted=0 AND instr(lower(text),lower(?))>0 ${saved ? 'AND id IN (SELECT messageId FROM saved WHERE memberId=?)' : ''} ORDER BY createdAt DESC LIMIT 300`,
+            `SELECT m.id FROM messages m JOIN rooms r ON r.id=m.roomId WHERE m.deleted=0 AND instr(lower(m.text),lower(?))>0 AND (r.recipient IS NULL OR r.recipient=? OR r.creator=?) ${saved ? 'AND m.id IN (SELECT messageId FROM saved WHERE memberId=?)' : ''} ORDER BY m.createdAt DESC,m.rowid DESC LIMIT 100`,
           )
-          .all(...(saved ? [query, who] : [query])) as {
+          .all(query, who, who, ...(saved ? [who] : [])) as {
           id: string;
-          roomId: string;
         }[]
       )
-        .filter((m) => roomIds.has(m.roomId))
-        .slice(0, 100)
         .map((m) => readMessage(m.id, who));
     },
     markRead(roomId: string, through: number, who: string) {

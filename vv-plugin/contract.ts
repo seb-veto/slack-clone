@@ -94,10 +94,34 @@ export const message = z.object({
   attachment: z.object({ name: z.string(), mime: z.string() }).nullable(),
   reactions: z.array(z.object({ emoji: z.string(), members: z.array(id) })),
   saved: z.boolean(),
+  replyCount: z.number().int().nonnegative().default(0),
+  lastReply: z
+    .object({ author: id, createdAt: z.number() })
+    .nullable()
+    .default(null),
 });
 export type Member = z.infer<typeof member>;
 export type Room = z.infer<typeof room>;
 export type Message = z.infer<typeof message>;
+export const historyInput = z
+  .object({
+    roomId: id,
+    parentId: id.optional(),
+    before: id.optional(),
+    after: id.optional(),
+    around: id.optional(),
+  })
+  .refine(
+    (v) => [v.before, v.after, v.around].filter(Boolean).length <= 1,
+    'Choose one history cursor.',
+  );
+export const historyPage = z.object({
+  messages: z.array(message),
+  parent: message.nullable(),
+  before: id.nullable(),
+  after: id.nullable(),
+});
+export type HistoryPage = z.infer<typeof historyPage>;
 export const assistantSession = z.object({
   requestId: z.string().uuid(),
   roomId: id,
@@ -119,6 +143,7 @@ export const assistantRequest = z.object({
   sessionOptions: z.json().optional(),
 });
 export const rpcContract = defineRpcContract({
+  history: { input: historyInput, output: historyPage },
   assistant: {
     input: z.object({ roomId: id }),
     output: assistantSession.nullable(),
