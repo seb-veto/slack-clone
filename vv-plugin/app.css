@@ -1521,3 +1521,41 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* shortcut: scoped palette targets SDK0.6.56; recheck native controls on SDK upgrades. */
+.slack-assistant .slack-native {
+  color-scheme: light;
+  --background: #fff;
+  --foreground: #1d1c1d;
+  --sidebar: #fff;
+  --sidebar-foreground: #1d1c1d;
+  --sidebar-accent: #f4f4f4;
+  --sidebar-accent-foreground: #1d1c1d;
+  --card: #fff;
+  --card-foreground: #1d1c1d;
+  --popover: #fff;
+  --popover-foreground: #1d1c1d;
+  --muted: #f8f8f8;
+  --muted-foreground: #616061;
+  --subtle-foreground: #616061;
+  --readback-foreground: #616061;
+  --secondary: #f4f4f4;
+  --secondary-foreground: #1d1c1d;
+  --accent: #f4f4f4;
+  --accent-foreground: #1d1c1d;
+  --primary: #007a5a;
+  --primary-foreground: #fff;
+  --border: #ddd;
+  --border-hairline: #ddd;
+  --border-seam: #e5e5e5;
+  --input: #868686;
+  --ring: #1264a3;
+  --surface-recessed: #f8f8f8;
+  --surface-hover: #f4f4f4;
+  --pill-foreground: #1d1c1d;
+  --pill-surface-border: #ddd;
+  background: var(--background);
+  color: var(--foreground);
+}
+.slack-assistant .slack-native .thread-timeline-activity-header .opacity-40 {
+  opacity: 1;
+}
