@@ -45,7 +45,7 @@ import { Assistant } from './assistant.tsx';
 import { useConversationHistory } from './history.ts';
 import { Files as FilesView } from './files.tsx';
 import { Directory, Profile } from './directory.tsx';
-import { MoreNavigation } from './navigation.tsx';
+import { MoreNavigation, RecentHistory } from './navigation.tsx';
 import type { z } from 'zod';
 import {
   rpcContract,
@@ -508,6 +508,17 @@ function Slack() {
         (event.target as HTMLElement).closest('.ql-editor')
       )
         event.stopPropagation();
+      const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+      const offset = mac && event.metaKey && !event.shiftKey
+        ? event.key === '[' ? -1 : event.key === ']' ? 1 : 0
+        : !mac && event.altKey && !event.shiftKey
+          ? event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0
+          : 0;
+      if (offset && !root.current?.querySelector('dialog[open], [popover]:popover-open')) {
+        event.preventDefault();
+        event.stopPropagation();
+        changeHistory(offset);
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         setModal('search');
@@ -527,7 +538,7 @@ function Slack() {
     const el = root.current;
     el?.addEventListener('keydown', onKey);
     return () => el?.removeEventListener('keydown', onKey);
-  }, [modal, profileId]);
+  }, [modal, profileId, history, historyAt]);
   async function act<T>(fn: () => Promise<T>) {
     setError('');
     try {
@@ -750,6 +761,8 @@ function Slack() {
           >
             <ArrowRight size={18} />
           </IconButton>
+          <RecentHistory history={history} at={historyAt} rooms={data.rooms}
+            onSelect={(at) => changeHistory(at - historyAt)} />
         </div>
         <button
           className="slack-top-search"
@@ -1492,6 +1505,8 @@ function Slack() {
               <dl className="slack-shortcuts">
                 <dt>Search conversations</dt>
                 <dd>⌘ / Ctrl K</dd>
+                <dt>Previous / next conversation</dt>
+                <dd>⌘ [ / ] (Mac), Alt ← / → (Windows/Linux)</dd>
                 <dt>Send a message</dt>
                 <dd>Enter</dd>
                 <dt>New line</dt>
@@ -1506,6 +1521,8 @@ function Slack() {
                 <dd>Escape</dd>
               </dl>
               <p>
+                History reopens recently visited conversations in this view.
+                Use arrow keys in menus and Escape to return focus.
                 Hover or focus a message for reactions, replies, saving and your
                 own edit/delete actions. Format selected text or what you type
                 next; lists, quotes and code blocks format the current line.
