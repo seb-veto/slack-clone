@@ -1,3 +1,4 @@
+import { ToDos, TodoForm } from './todos.tsx';
 import {
   recoverDraft,
   retainDraft,
@@ -40,6 +41,7 @@ import {
   Check,
   Sparkles,
   Files as FilesIcon,
+  ListTodo,
 } from 'lucide-react';
 import { Assistant } from './assistant.tsx';
 import { useConversationHistory } from './history.ts';
@@ -55,6 +57,7 @@ import {
   type HistoryPage,
   type delta,
   type file,
+  type Todo,
 } from './contract.ts';
 import { Attachment } from './attachment.tsx';
 import {
@@ -83,24 +86,21 @@ type Mode =
   | 'saved'
   | 'threads'
   | 'files'
-  | 'directories';
+  | 'directories'
+  | 'todos';
 type Modal =
-  | 'channel'
-  | 'dm'
-  | 'settings'
-  | 'help'
-  | 'details'
-  | 'search'
-  | null;
+  'channel' | 'dm' | 'settings' | 'help' | 'details' | 'search' | null;
 
 function Dialog({
   title,
   onClose,
   children,
+  busy = false,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  busy?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useLayoutEffect(() => {
@@ -127,14 +127,15 @@ function Dialog({
       className="slack-dialog"
       ref={ref}
       aria-label={title}
+      aria-busy={busy}
       onCancel={(e) => {
         e.preventDefault();
-        onClose();
+        if (!busy) onClose();
       }}
     >
       <header>
         <h2>{title}</h2>
-        <IconButton label="Close dialog" onClick={onClose}>
+        <IconButton label="Close dialog" disabled={busy} onClick={onClose}>
           <X size={20} />
         </IconButton>
       </header>
@@ -317,6 +318,11 @@ function Slack() {
     [description, setDescription] = useState(''),
     [workspace, setWorkspace] = useState(''),
     [name, setName] = useState('');
+  const [todoSaving, setTodoSaving] = useState(false);
+  const [todoEditor, setTodoEditor] = useState<{ item?: Todo } | null>(null);
+  const [dueTodos, setDueTodos] = useState(0);
+  const [savedTodoCount, setSavedTodoCount] = useState(0);
+  const todoRequests = useRef(new Map<string, string>());
   const [history, setHistory] = useState([roomId]),
     [historyAt, setHistoryAt] = useState(0);
   const root = useRef<HTMLElement>(null),
@@ -357,7 +363,11 @@ function Slack() {
     }
     if (version !== refreshVersion.current) return;
     await conversation.refresh();
-    if (version === refreshVersion.current) setData(next);
+    const count = await rpc.call('todoDueCount', {});
+    if (version === refreshVersion.current) {
+      setData(next);
+      setDueTodos(count);
+    }
   }, [rpc, roomId, conversation.refresh]);
   useEffect(() => {
     let live = true;
@@ -385,7 +395,9 @@ function Slack() {
   useLayoutEffect(() => {
     if (mode === 'home' && document.activeElement === document.body)
       root.current
-        ?.querySelector<HTMLButtonElement>('.slack-main .slack-channel-header > button')
+        ?.querySelector<HTMLButtonElement>(
+          '.slack-main .slack-channel-header > button',
+        )
         ?.focus();
   }, [mode, roomId]);
   useEffect(() => {
@@ -509,12 +521,24 @@ function Slack() {
       )
         event.stopPropagation();
       const mac = /Mac|iPhone|iPad/.test(navigator.platform);
-      const offset = mac && event.metaKey && !event.shiftKey
-        ? event.key === '[' ? -1 : event.key === ']' ? 1 : 0
-        : !mac && event.altKey && !event.shiftKey
-          ? event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0
-          : 0;
-      if (offset && !root.current?.querySelector('dialog[open], [popover]:popover-open')) {
+      const offset =
+        mac && event.metaKey && !event.shiftKey
+          ? event.key === '['
+            ? -1
+            : event.key === ']'
+              ? 1
+              : 0
+          : !mac && event.altKey && !event.shiftKey
+            ? event.key === 'ArrowLeft'
+              ? -1
+              : event.key === 'ArrowRight'
+                ? 1
+                : 0
+            : 0;
+      if (
+        offset &&
+        !root.current?.querySelector('dialog[open], [popover]:popover-open')
+      ) {
         event.preventDefault();
         event.stopPropagation();
         changeHistory(offset);
@@ -524,7 +548,10 @@ function Slack() {
         setModal('search');
       }
       if (event.key === 'Escape') {
-        if (modal || root.current?.querySelector('dialog[open], [popover]:popover-open'))
+        if (
+          modal ||
+          root.current?.querySelector('dialog[open], [popover]:popover-open')
+        )
           return;
         if (profileId) {
           closeProfile();
@@ -713,6 +740,28 @@ function Slack() {
                 }}
                 onReaction={() => setReactionId(m.id)}
                 onSave={() => void act(() => rpc.call('save', { id: m.id }))}
+                todo={Boolean(m.todoId)}
+                onTodo={() => {
+                  if (m.todoId) {
+                    todoRequests.current.delete(m.id);
+                    switchMode('todos');
+                    return;
+                  }
+                  const id =
+                    todoRequests.current.get(m.id) ?? crypto.randomUUID();
+                  todoRequests.current.set(m.id, id);
+                  void act(() =>
+                    rpc.call('todoCreate', { id, messageId: m.id }),
+                  ).then((value) => {
+                    if (value) {
+                      todoRequests.current.delete(m.id);
+                      if (value.destination === 'cleared')
+                        setError(
+                          'That previous to-do was cleared. Add it again to create a new one.',
+                        );
+                    }
+                  });
+                }}
               />
             </>
           )}
@@ -761,8 +810,12 @@ function Slack() {
           >
             <ArrowRight size={18} />
           </IconButton>
-          <RecentHistory history={history} at={historyAt} rooms={data.rooms}
-            onSelect={(at) => changeHistory(at - historyAt)} />
+          <RecentHistory
+            history={history}
+            at={historyAt}
+            rooms={data.rooms}
+            onSelect={(at) => changeHistory(at - historyAt)}
+          />
         </div>
         <button
           className="slack-top-search"
@@ -796,6 +849,7 @@ function Slack() {
               { id: 'home', label: 'Home', icon: Home },
               { id: 'dms', label: 'DMs', icon: MessagesSquare },
               { id: 'activity', label: 'Activity', icon: Bell },
+              { id: 'todos', label: 'To-dos', icon: ListTodo },
               { id: 'files', label: 'Files', icon: FilesIcon },
             ] as const
           ).map((item) => (
@@ -816,8 +870,11 @@ function Slack() {
             >
               <span>
                 <item.icon size={22} />
-                {item.id === 'activity' && unread > 0 && (
-                  <b className="slack-rail-unread">{unread}</b>
+                {((item.id === 'activity' && unread + dueTodos > 0) ||
+                  (item.id === 'todos' && dueTodos > 0)) && (
+                  <b className="slack-rail-unread">
+                    {item.id === 'todos' ? dueTodos : unread + dueTodos}
+                  </b>
                 )}
               </span>
               {item.label}
@@ -994,7 +1051,12 @@ function Slack() {
           )}
         </aside>
         <main className="slack-main">
-          {mode === 'files' ? (
+          {mode === 'todos' ? (
+            <ToDos
+              onEdit={(item) => setTodoEditor({ item })}
+              onOpen={jumpToMessage}
+            />
+          ) : mode === 'files' ? (
             renderFiles()
           ) : mode === 'directories' ? (
             <Directory
@@ -1196,6 +1258,21 @@ function Slack() {
                 )}
               </header>
               <div className="slack-message-scroll">
+                {mode === 'activity' && (
+                  <ToDos
+                    activity
+                    onEdit={(item) => setTodoEditor({ item })}
+                    onOpen={jumpToMessage}
+                  />
+                )}
+                {mode === 'saved' && (
+                  <ToDos
+                    destination="saved"
+                    onCount={setSavedTodoCount}
+                    onEdit={(item) => setTodoEditor({ item })}
+                    onOpen={jumpToMessage}
+                  />
+                )}
                 {mode === 'saved' ? (
                   results.length ? (
                     results.map((m) => (
@@ -1214,7 +1291,10 @@ function Slack() {
                       </div>
                     ))
                   ) : (
-                    <div className="slack-empty">
+                    <div
+                      className="slack-empty"
+                      style={savedTodoCount ? { display: 'none' } : undefined}
+                    >
                       <Bookmark size={40} />
                       <h2>Save it for a little later</h2>
                       <p>Save a message to come back to it here.</p>
@@ -1240,38 +1320,39 @@ function Slack() {
                           {r.unread > 0 && <span>{r.unread} unread</span>}
                         </button>
                       ))}
-                    {!data.rooms.some((r) =>
-                      mode === 'dms' ? r.recipient : r.unread > 0,
-                    ) && (
-                      <div className="slack-empty">
-                        {mode === 'dms' ? (
-                          <MessagesSquare size={40} />
-                        ) : (
-                          <Check size={40} />
-                        )}
-                        <h2>
-                          {mode === 'dms'
-                            ? 'Start a conversation'
-                            : 'You’re all caught up'}
-                        </h2>
-                        <p>
-                          {mode === 'dms'
-                            ? 'Agents appear as teammates when they use the Slack tool.'
-                            : 'New messages from your teammates will appear here.'}
-                        </p>
-                        {mode === 'dms' && (
-                          <button
-                            type="button"
-                            title="Find a teammate"
-                            aria-describedby="slack-key-help"
-                            className="slack-primary"
-                            onClick={() => setModal('dm')}
-                          >
-                            Find a teammate
-                          </button>
-                        )}
-                      </div>
-                    )}
+                    {(mode !== 'activity' || dueTodos === 0) &&
+                      !data.rooms.some((r) =>
+                        mode === 'dms' ? r.recipient : r.unread > 0,
+                      ) && (
+                        <div className="slack-empty">
+                          {mode === 'dms' ? (
+                            <MessagesSquare size={40} />
+                          ) : (
+                            <Check size={40} />
+                          )}
+                          <h2>
+                            {mode === 'dms'
+                              ? 'Start a conversation'
+                              : 'You’re all caught up'}
+                          </h2>
+                          <p>
+                            {mode === 'dms'
+                              ? 'Agents appear as teammates when they use the Slack tool.'
+                              : 'New messages from your teammates will appear here.'}
+                          </p>
+                          {mode === 'dms' && (
+                            <button
+                              type="button"
+                              title="Find a teammate"
+                              aria-describedby="slack-key-help"
+                              className="slack-primary"
+                              onClick={() => setModal('dm')}
+                            >
+                              Find a teammate
+                            </button>
+                          )}
+                        </div>
+                      )}
                   </>
                 )}
               </div>
@@ -1521,13 +1602,12 @@ function Slack() {
                 <dd>Escape</dd>
               </dl>
               <p>
-                History reopens recently visited conversations in this view.
-                Use arrow keys in menus and Escape to return focus.
-                Hover or focus a message for reactions, replies, saving and your
-                own edit/delete actions. Format selected text or what you type
-                next; lists, quotes and code blocks format the current line.
-                Draft text is saved as you type. Files up to 2 MB can be
-                attached.
+                History reopens recently visited conversations in this view. Use
+                arrow keys in menus and Escape to return focus. Hover or focus a
+                message for reactions, replies, saving and your own edit/delete
+                actions. Format selected text or what you type next; lists,
+                quotes and code blocks format the current line. Draft text is
+                saved as you type. Files up to 2 MB can be attached.
               </p>
               <p>
                 Built from the MIT-licensed Slack Clone by Sanidhya Kumar Verma.
@@ -1626,6 +1706,19 @@ function Slack() {
               alt={preview.name}
             />
           </div>
+        </Dialog>
+      )}
+      {todoEditor && (
+        <Dialog
+          busy={todoSaving}
+          title={todoEditor.item ? 'Edit to-do' : 'Add to-do'}
+          onClose={() => setTodoEditor(null)}
+        >
+          <TodoForm
+            item={todoEditor.item}
+            onPending={setTodoSaving}
+            onSaved={() => setTodoEditor(null)}
+          />
         </Dialog>
       )}
       {editing && (

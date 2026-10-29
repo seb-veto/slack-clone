@@ -1559,3 +1559,22 @@
 .slack-assistant .slack-native .thread-timeline-activity-header .opacity-40 {
   opacity: 1;
 }
+.slack-todos { display:flex;flex-direction:column;min-height:0;flex:1;overflow:auto; }
+.slack-todos-embedded { flex:none;overflow:visible; }
+.slack-todos-embedded > h2 { padding:16px 20px 4px;font-size:16px; }
+.slack-todo-filters { display:flex;flex-wrap:wrap;gap:16px;padding:16px 20px;border-bottom:1px solid var(--slack-border);font-size:13px; }
+.slack-todo-filters label { display:flex;align-items:center;gap:8px; }
+.slack-todo-filters select { background:white;color:var(--slack-ink);border:1px solid #ddd;border-radius:5px;padding:4px; }
+.slack-todo-list { padding:12px 20px; }
+.slack-todo-card { display:flex;align-items:flex-start;gap:12px;padding:16px 12px;border:1px solid var(--slack-border);border-radius:8px;margin-bottom:12px; }
+.slack-todo-content { flex:1;min-width:0;overflow-wrap:anywhere; }
+.slack-todo-card.is-complete .slack-message-text { color:var(--slack-muted);text-decoration:line-through; }
+.slack-todo-original { color:#1264a3!important;font-size:12px!important;margin-bottom:6px; }
+.slack-todo-date { display:flex;align-items:center;gap:5px;font-size:12px;color:var(--slack-muted);margin-top:8px; }
+.slack-todo-date.is-overdue { color:#b33b00; }
+.slack-todo-actions { display:flex;flex-wrap:wrap;max-width:92px; }
+.slack-todo-presets { display:flex;flex-wrap:wrap;gap:10px;font-size:13px; }
+.slack-todo-presets button { border:1px solid #ddd!important;padding:4px 8px;border-radius:4px; }
+.slack-todo-preview { max-height:180px;overflow:auto;white-space:pre-wrap; }
+.slack-todo-pages { display:flex;justify-content:center;gap:20px;padding:12px;font-size:13px; }
+.slack-todos .slack-primary { display:flex;align-items:center;gap:6px; }

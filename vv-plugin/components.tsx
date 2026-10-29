@@ -12,6 +12,7 @@ import {
   Pencil,
   Trash2,
   Bookmark,
+  ListTodo,
   Send,
   Paperclip,
   X,
@@ -134,6 +135,8 @@ export function Toolbar({
   onThread,
   onReaction,
   onSave,
+  todo,
+  onTodo,
 }: {
   own: boolean;
   saved: boolean;
@@ -142,11 +145,20 @@ export function Toolbar({
   onThread: () => void;
   onReaction: () => void;
   onSave: () => void;
+  todo: boolean;
+  onTodo: () => void;
 }) {
   return (
     <div className="slack-message-toolbar">
       <IconButton label="Add reaction" onClick={onReaction}>
         <Smile size={17} />
+      </IconButton>
+      <IconButton
+        label={todo ? 'Open to-do' : 'Add to-do'}
+        aria-pressed={todo}
+        onClick={onTodo}
+      >
+        <ListTodo size={17} />
       </IconButton>
       <IconButton label="Reply in thread" onClick={onThread}>
         <MessageSquareText size={17} />
