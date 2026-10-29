@@ -41,3 +41,11 @@ export const todo = z.object({
   destination: z.enum(['todos', 'saved', 'cleared']),
 });
 export type Todo = z.infer<typeof todo>;
+export const todoBulkPrepare = todoList
+  .omit({ destination: true, sort: true, offset: true })
+  .extend({ action: z.enum(['complete', 'saved', 'clear']) });
+export const todoBulkPreview = z.object({
+  id: z.string().uuid(),
+  action: z.enum(['complete', 'saved', 'clear']),
+  count: z.number().int().nonnegative(),
+});

@@ -10,6 +10,7 @@ import {
   todoCreate,
   todoUpdate,
   todoList,
+  todoBulkPrepare,
 } from './contract.ts';
 import { createStore } from './store.ts';
 import { createIntelligence } from './intelligence.ts';
@@ -24,6 +25,8 @@ export default function plugin(bb: BbPluginApi) {
   };
   const human = store.actor().id;
   bb.rpc.register(rpcContract, {
+    todoBulkPrepare: (v) => store.todos.prepareBulk(v, human),
+    todoBulkApply: (v) => changed(store.todos.applyBulk(v.id, human)),
     todoCreate: (v) => changed(store.todos.create(v, human)),
     todoUpdate: (v) => changed(store.todos.update(v, human)),
     todoList: (v) => store.todos.list(v, human),
@@ -51,6 +54,13 @@ export default function plugin(bb: BbPluginApi) {
     todoCreate.safeExtend({ action: z.literal('todo_create') }),
     todoUpdate.safeExtend({ action: z.literal('todo_update') }),
     todoList.extend({ action: z.literal('todos') }),
+    todoBulkPrepare
+      .omit({ action: true })
+      .extend({
+        action: z.literal('todo_bulk_prepare'),
+        operation: todoBulkPrepare.shape.action,
+      }),
+    z.object({ action: z.literal('todo_bulk_apply'), id: z.string().uuid() }),
     z.object({ action: z.literal('read'), roomId: id }),
     z.object({ action: z.literal('history'), ...historyInput.shape }),
     z.object({ action: z.literal('files'), ...filesInput.shape }),
@@ -80,6 +90,12 @@ export default function plugin(bb: BbPluginApi) {
         const { action, ...v } = input;
         return changed(store.todos.update(v, who));
       }
+      case 'todo_bulk_prepare': {
+        const { action, operation, ...v } = input;
+        return store.todos.prepareBulk({ ...v, action: operation }, who);
+      }
+      case 'todo_bulk_apply':
+        return changed(store.todos.applyBulk(input.id, who));
       case 'todos': {
         const { action, ...v } = input;
         return store.todos.list(v, who);
@@ -105,7 +121,7 @@ export default function plugin(bb: BbPluginApi) {
   bb.agents.registerTool({
     name: 'vv_slack',
     description:
-      'Use VV Slack: list channels, read or page through conversation and thread history, create channels or DMs, search, send messages or threaded replies, toggle reactions, and manage your personal to-dos with todos/todo_create/todo_update. To-dos are private to your actual calling identity. history returns up to 100 messages with before/after cursors; parentId reads replies; around locates a message. files browses visible file metadata with optional query, type, roomId and before cursor; it excludes file bytes. Local VV workspace only. Use a stable UUID for each send; reuse it only for an identical uncertain submission. Your author identity is your actual BB thread. Messages do not automatically run another agent.',
+      'Use VV Slack: list channels, read or page through conversation and thread history, create channels or DMs, search, send messages or threaded replies, toggle reactions, and manage your personal to-dos with todos/todo_create/todo_update. Bulk changes use todo_bulk_prepare {operation:complete|saved|clear,status?,reminder?}, then todo_bulk_apply {id} with its reviewed preview ID; retries replay the receipt, and edited items require a new review. To-dos are private to your actual calling identity. history returns up to 100 messages with before/after cursors; parentId reads replies; around locates a message. files browses visible file metadata with optional query, type, roomId and before cursor; it excludes file bytes. Local VV workspace only. Use a stable UUID for each send; reuse it only for an identical uncertain submission. Your author identity is your actual BB thread. Messages do not automatically run another agent.',
     parameters: operations,
     execute: (input, context) =>
       JSON.stringify(execute(input, context.threadId)),
@@ -126,7 +142,7 @@ export default function plugin(bb: BbPluginApi) {
         return {
           exitCode: 0,
           stdout:
-            'bb slack call --input <JSON> [--json]\nActions: todos {destination?,status?,reminder?,sort?,offset?}, todo_create {id,text|messageId,dueAt?}, todo_update {id,text?,dueAt?,completed?,destination?}, channels, read {roomId}, history {roomId,parentId?,before?|after?|around?}, files {query?,type?,roomId?,before?}, create {name,description?,recipient?}, send {id,roomId,text,parentId?,rich?,attachment?}, search {query}, react {id,emoji}.\nHistory returns 100 messages and before/after cursors. A send requires a UUID; retry an uncertain send with the same ID and identical content. Local VV only. No agent starts automatically.',
+            'bb slack call --input <JSON> [--json]\nActions: todo_bulk_prepare {operation:complete|saved|clear,status?,reminder?}, todo_bulk_apply {id}, todos {destination?,status?,reminder?,sort?,offset?}, todo_create {id,text|messageId,dueAt?}, todo_update {id,text?,dueAt?,completed?,destination?}, channels, read {roomId}, history {roomId,parentId?,before?|after?|around?}, files {query?,type?,roomId?,before?}, create {name,description?,recipient?}, send {id,roomId,text,parentId?,rich?,attachment?}, search {query}, react {id,emoji}.\nHistory returns 100 messages and before/after cursors. A send requires a UUID; retry an uncertain send with the same ID and identical content. Local VV only. No agent starts automatically.',
         };
       try {
         const index = argv.indexOf('--input');

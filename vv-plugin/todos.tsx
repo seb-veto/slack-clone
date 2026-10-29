@@ -1,3 +1,4 @@
+import { Dialog } from './dialog.tsx';
 import {
   useCallback,
   useEffect,
@@ -23,8 +24,19 @@ import {
 import { rpcContract, type Todo, type Message } from './contract.ts';
 import { IconButton, RichText } from './components.tsx';
 import type { z } from 'zod';
-import type { todoList, todoUpdate } from './todo-contract.ts';
+import type {
+  todoList,
+  todoUpdate,
+  todoBulkPreview,
+  todoBulkPrepare,
+} from './todo-contract.ts';
 type Query = z.input<typeof todoList>;
+type BulkAction = z.infer<typeof todoBulkPrepare>['action'];
+const bulkLabels = {
+  complete: 'Mark complete',
+  saved: 'Move to Saved',
+  clear: 'Clear to-dos',
+};
 const localTime = (timestamp: number) => {
   const d = new Date(timestamp);
   return new Date(timestamp - d.getTimezoneOffset() * 60000)
@@ -188,6 +200,10 @@ export function ToDos({
     }>(),
     [error, setError] = useState(''),
     [pending, setPending] = useState(false);
+  const [bulkAction, setBulkAction] = useState<BulkAction>('complete');
+  const [bulk, setBulk] = useState<z.infer<typeof todoBulkPreview> | null>(
+    null,
+  );
   const [loadedKey, setLoadedKey] = useState('');
   const version = useRef(0),
     key = JSON.stringify({
@@ -238,6 +254,38 @@ export function ToDos({
     setPending(true);
     try {
       await rpc.call('todoUpdate', value);
+      setOffset(0);
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setPending(false);
+    }
+  };
+  const prepareBulk = async () => {
+    if (pending) return;
+    setPending(true);
+    setError('');
+    try {
+      setBulk(
+        await rpc.call('todoBulkPrepare', {
+          action: bulkAction,
+          status,
+          reminder,
+        }),
+      );
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setPending(false);
+    }
+  };
+  const applyBulk = async () => {
+    if (pending || !bulk) return;
+    setPending(true);
+    try {
+      await rpc.call('todoBulkApply', { id: bulk.id });
+      setBulk(null);
       setOffset(0);
       await refresh();
     } catch (e) {
@@ -321,6 +369,84 @@ export function ToDos({
             </select>
           </label>
         </div>
+      )}
+      {!activity && destination === 'todos' && (
+        <div className="slack-todo-filters">
+          <label>
+            Bulk action
+            <select
+              aria-describedby="slack-bulk-help"
+              value={bulkAction}
+              disabled={pending}
+              onChange={(e) => setBulkAction(e.target.value as BulkAction)}
+            >
+              <option value="complete">Mark complete</option>
+              <option value="saved">Move to Saved</option>
+              <option value="clear">Clear to-dos</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            title="Review bulk action"
+            aria-describedby="slack-bulk-help slack-key-help"
+            disabled={pending || !visible?.total}
+            onClick={() => void prepareBulk()}
+          >
+            Review
+          </button>
+          <p id="slack-bulk-help">
+            Review all to-dos matching these filters, across every page, before
+            applying.
+          </p>
+        </div>
+      )}
+      {bulk && (
+        <Dialog
+          title="Review to-do cleanup"
+          busy={pending}
+          onClose={() => setBulk(null)}
+        >
+          <div className="slack-dialog-body">
+            <p>
+              {bulkLabels[bulk.action]}: {bulk.count} to-do
+              {bulk.count === 1 ? '' : 's'}.
+            </p>
+            <p>
+              Only the reviewed items will change. New items stay untouched. If
+              a reviewed item changes, review again.
+            </p>
+            {bulk.action === 'clear' && (
+              <p>
+                Cleared items leave To-dos and Saved. Original messages and
+                files remain.
+              </p>
+            )}
+            {error && (
+              <p role="alert" className="slack-error">
+                {error}
+              </p>
+            )}
+            <button
+              type="button"
+              className="slack-primary"
+              title="Apply reviewed action"
+              aria-describedby="slack-key-help"
+              disabled={pending || !bulk.count}
+              onClick={() => void applyBulk()}
+            >
+              {pending ? 'Applying…' : 'Apply'}
+            </button>
+            <button
+              type="button"
+              title="Cancel bulk action"
+              aria-describedby="slack-key-help"
+              disabled={pending}
+              onClick={() => setBulk(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </Dialog>
       )}
       {error && (
         <p role="alert" className="slack-error">

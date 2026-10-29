@@ -1,7 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import type { BbPluginApi } from '@get-bb/plugin-sdk';
 import type { z } from 'zod';
 import type { Message } from './message-contract.ts';
-import { todoCreate, todoUpdate, todoList, todo } from './todo-contract.ts';
+import {
+  todoCreate,
+  todoUpdate,
+  todoList,
+  todo,
+  todoBulkPrepare,
+} from './todo-contract.ts';
 type DB = ReturnType<BbPluginApi['storage']['database']>;
 type Row = {
   id: string;
@@ -13,10 +20,13 @@ type Row = {
   createdAt: number;
   destination: 'todos' | 'saved' | 'cleared';
   creation: string;
+  revision: number;
 };
 export const todoMigration = `CREATE TABLE todos (id TEXT PRIMARY KEY,owner TEXT NOT NULL,messageId TEXT,text TEXT NOT NULL,dueAt INTEGER,completedAt INTEGER,createdAt INTEGER NOT NULL,destination TEXT NOT NULL,creation TEXT NOT NULL);
 CREATE INDEX todo_owner ON todos(owner,destination,createdAt);
 CREATE UNIQUE INDEX todo_active_message ON todos(owner,messageId) WHERE destination='todos' AND messageId IS NOT NULL;`;
+export const todoBulkMigration = `ALTER TABLE todos ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE todo_bulk (id TEXT PRIMARY KEY,owner TEXT NOT NULL,action TEXT NOT NULL,selection TEXT NOT NULL,result TEXT);`;
 export function createTodos(
   db: DB,
   readMessage: (id: string, who: string) => Message,
@@ -34,7 +44,7 @@ export function createTodos(
       ...v,
       message: v.messageId ? readMessage(v.messageId, who) : null,
     });
-  return {
+  const api = {
     list(input: z.input<typeof todoList>, who: string) {
       const v = todoList.parse(input),
         params: unknown[] = [who, v.destination];
@@ -86,7 +96,8 @@ export function createTodos(
         creation = JSON.stringify(v);
       return db.transaction(() => {
         const old = db.prepare('SELECT * FROM todos WHERE id=?').get(v.id) as
-          Row | undefined;
+          | Row
+          | undefined;
         if (old) {
           if (old.owner !== who || old.creation !== creation)
             throw Error('This ID belongs to a different to-do request.');
@@ -104,7 +115,9 @@ export function createTodos(
           )
             throw Error('Message already has a to-do.');
         }
-        db.prepare('INSERT INTO todos VALUES (?,?,?,?,?,?,?,?,?)').run(
+        db.prepare(
+          'INSERT INTO todos (id,owner,messageId,text,dueAt,completedAt,createdAt,destination,creation) VALUES (?,?,?,?,?,?,?,?,?)',
+        ).run(
           v.id,
           who,
           v.messageId,
@@ -121,6 +134,76 @@ export function createTodos(
             who,
           );
         return render(row(v.id, who), who);
+      })();
+    },
+    prepareBulk(input: z.input<typeof todoBulkPrepare>, who: string) {
+      const v = todoBulkPrepare.parse(input);
+      return db.transaction(() => {
+        const params: unknown[] = [who];
+        let filter = `${eligible} AND t.destination='todos'`;
+        if (v.status !== 'all')
+          filter +=
+            v.status === 'completed'
+              ? ' AND t.completedAt IS NOT NULL'
+              : ' AND t.completedAt IS NULL';
+        if (v.reminder === 'none') filter += ' AND t.dueAt IS NULL';
+        if (v.reminder === 'overdue' || v.reminder === 'upcoming') {
+          filter += ` AND t.dueAt ${v.reminder === 'overdue' ? '<=' : '>'} ?`;
+          params.push(Date.now());
+        }
+        const selected = db
+          .prepare(
+            `SELECT t.id,t.revision FROM todos t WHERE ${filter} ORDER BY t.id`,
+          )
+          .all(...params);
+        const id = randomUUID();
+        db.prepare('INSERT INTO todo_bulk VALUES (?,?,?,?,NULL)').run(
+          id,
+          who,
+          v.action,
+          JSON.stringify(selected),
+        );
+        return { id, action: v.action, count: selected.length };
+      })();
+    },
+    applyBulk(id: string, who: string): { count: number } {
+      return db.transaction(() => {
+        const preview = db
+          .prepare('SELECT * FROM todo_bulk WHERE id=? AND owner=?')
+          .get(id, who) as
+          | {
+              action: 'complete' | 'saved' | 'clear';
+              selection: string;
+              result: string | null;
+            }
+          | undefined;
+        if (!preview) throw Error('Cleanup preview not available.');
+        if (preview.result) return JSON.parse(preview.result);
+        const selected = JSON.parse(preview.selection) as {
+          id: string;
+          revision: number;
+        }[];
+        for (const item of selected) {
+          if (row(item.id, who).revision !== item.revision)
+            throw Error('To-dos changed. Review cleanup again.');
+        }
+        for (const { id } of selected) {
+          api.update(
+            preview.action === 'complete'
+              ? { id, completed: true }
+              : {
+                  id,
+                  destination: preview.action === 'saved' ? 'saved' : 'cleared',
+                },
+            who,
+          );
+        }
+        const result = { count: selected.length };
+        db.prepare('UPDATE todo_bulk SET result=? WHERE id=?').run(
+          JSON.stringify(result),
+          id,
+        );
+        return result;
       })();
     },
     update(input: z.input<typeof todoUpdate>, who: string) {
@@ -148,7 +231,7 @@ export function createTodos(
               ? (old.completedAt ?? Date.now())
               : null;
         db.prepare(
-          'UPDATE todos SET text=?,dueAt=?,completedAt=?,destination=? WHERE id=?',
+          'UPDATE todos SET text=?,dueAt=?,completedAt=?,destination=?,revision=revision+1 WHERE id=?',
         ).run(
           v.text ?? old.text,
           v.dueAt === undefined ? old.dueAt : v.dueAt,
@@ -160,4 +243,5 @@ export function createTodos(
       })();
     },
   };
+  return api;
 }

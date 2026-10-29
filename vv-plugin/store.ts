@@ -1,4 +1,8 @@
-import { createTodos, todoMigration } from './todos-store.ts';
+import {
+  createTodos,
+  todoMigration,
+  todoBulkMigration,
+} from './todos-store.ts';
 import { randomUUID } from 'node:crypto';
 import type { BbPluginApi } from '@get-bb/plugin-sdk';
 import type { z } from 'zod';
@@ -29,11 +33,13 @@ export function createStore(bb: BbPluginApi) {
      CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
     'CREATE INDEX message_parent ON messages(parentId,roomId,createdAt);',
     todoMigration,
+    todoBulkMigration,
   ]);
   const getSetting = (key: string) =>
     (
       db.prepare('SELECT value FROM settings WHERE key=?').get(key) as
-        { value: string } | undefined
+        | { value: string }
+        | undefined
     )?.value;
   function actor(threadId?: string | null): Member {
     const memberId = threadId ? `agent:${threadId}` : 'human';
@@ -57,14 +63,16 @@ export function createStore(bb: BbPluginApi) {
   );
   function access(roomId: string, who: string) {
     const row = db.prepare('SELECT * FROM rooms WHERE id=?').get(roomId) as
-      (Room & { creator: string }) | undefined;
+      | (Room & { creator: string })
+      | undefined;
     if (!row || (row.recipient && row.recipient !== who && row.creator !== who))
       throw new Error('Conversation not available.');
     return row;
   }
   const raw = (id: string) =>
     db.prepare('SELECT * FROM messages WHERE id=?').get(id) as
-      Record<string, unknown> | undefined;
+      | Record<string, unknown>
+      | undefined;
   function readMessage(id: string, who: string): Message {
     const row = raw(id);
     if (!row) throw new Error('Message not found.');
@@ -301,7 +309,8 @@ export function createStore(bb: BbPluginApi) {
               'SELECT id,roomId,parentId,createdAt,rowid AS seq FROM messages WHERE id=?',
             )
             .get(cursor) as
-            (Row & { roomId: string; parentId: string | null }) | undefined)
+            | (Row & { roomId: string; parentId: string | null })
+            | undefined)
         : undefined;
       if (
         cursor &&

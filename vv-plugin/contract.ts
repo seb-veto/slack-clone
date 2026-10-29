@@ -12,8 +12,22 @@ import {
   delta,
   file,
 } from './message-contract.ts';
-import { todoCreate, todoUpdate, todoList, todo } from './todo-contract.ts';
-export { todoCreate, todoUpdate, todoList, todo } from './todo-contract.ts';
+import {
+  todoCreate,
+  todoUpdate,
+  todoList,
+  todo,
+  todoBulkPrepare,
+  todoBulkPreview,
+} from './todo-contract.ts';
+export {
+  todoCreate,
+  todoUpdate,
+  todoList,
+  todo,
+  todoBulkPrepare,
+  todoBulkPreview,
+} from './todo-contract.ts';
 export type { Todo } from './todo-contract.ts';
 export const historyInput = z
   .object({
@@ -68,6 +82,11 @@ export const rpcContract = defineRpcContract({
       total: z.number(),
       nextOffset: z.number().nullable(),
     }),
+  },
+  todoBulkPrepare: { input: todoBulkPrepare, output: todoBulkPreview },
+  todoBulkApply: {
+    input: z.object({ id: z.string().uuid() }),
+    output: z.object({ count: z.number().int().nonnegative() }),
   },
   todoCreate: { input: todoCreate, output: todo },
   todoUpdate: { input: todoUpdate, output: todo },
